@@ -292,14 +292,15 @@ def actorfeed(actor: str) -> Response:
 
         author = profile["displayName"]
         avatar = profile["avatar"]
-        description = profile["description"]
+        # descriptions can be missing
+        description = profile.get("description", "")
         profile = {
             "did": actor,
             "handle": profile["handle"],
             "name": author,
             "avatar": avatar,
             "description": description,
-            "updated": now,
+            "updated": now.isoformat(),
             "fetched": None,
         }
         curs.execute(
@@ -335,7 +336,7 @@ def actorfeed(actor: str) -> Response:
                 "did": actor,
                 "url": post["url"],
                 "html": html,
-                "date": post["date"],
+                "date": post["date"].isoformat(),
                 "handle": post["author"],
                 "name": post["authorName"],
             }
