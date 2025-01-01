@@ -64,23 +64,16 @@ class BskyXrpcClient:
             r = self.s.get(url, params=params)
             r.raise_for_status()
             earliest_post_date = now
-            for post in (x["post"] for x in r.json()["feed"]):
-                post_stub = post["uri"].split("/")[-1]
-                data = {
-                    "author": post["author"]["handle"],
-                    "authorName": post["author"]["displayName"],
-                    "date": iso(post["record"]["createdAt"]),
-                    "text": post["record"]["text"],
-                    # FIXME: improve this hardcoded link?
-                    "url": f"{PROFILE_URL}/{post['author']['did']}/post/{post_stub}",
-                }
-                if "embed" in post:
-                    data["embed"] = post["embed"]
-                if "facets" in post["record"]:
-                    data["facets"] = post["record"]["facets"]
-                if data["date"] < now:
-                    earliest_post_date = data["date"]
-                posts[post["cid"]] = data
+            for item in r.json()["feed"]:
+                post = item["post"]
+                post_date = iso(post["record"]["createdAt"])
+                if post_date < now:
+                    earliest_post_date = post_date
+                if "reply" in item:
+                    post["reply"] = item["reply"]
+                if "reason" in item:
+                    post["reason"] = item["reason"]
+                posts[post["cid"]] = post
 
             if not last:
                 return posts
@@ -133,10 +126,68 @@ def get_media_embeds(embed):
     return embeds
 
 
+def get_post_metadata(post):
+    post_stub = post["uri"].split("/")[-1]
+    data = {
+        "author": post["author"]["handle"],
+        "authorName": post["author"]["displayName"],
+        "date": iso(post["record"]["createdAt"]),
+        "text": post["record"]["text"],
+        "record": post["record"],
+        # FIXME: improve this hardcoded link?
+        "url": f"{PROFILE_URL}/{post['author']['did']}/post/{post_stub}",
+    }
+    if (
+        "reason" in post
+        and post["reason"]["$type"] == "app.bsky.feed.defs#reasonRepost"
+    ):
+        data["title"] = f"Reposted {post['author']['handle']}: "
+    elif "embed" in post and "record" in post["embed"]:
+        match post["embed"]["record"]["$type"]:
+            case "app.bsky.embed.record#viewNotFound":
+                data["title"] = f"Quoted deleted post: "
+            case "app.bsky.embed.record#viewDetached":
+                data["title"] = f"Quoted detached post: "
+            case _:
+                if "author" in post["embed"]["record"]:
+                    data["title"] = (
+                        f"Quoted {post['embed']['record']['author']['handle']}: "
+                    )
+                else:
+                    data["title"] = ""
+    elif "reply" in post:
+        if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
+            data["title"] = "Replied to deleted post: "
+        else:
+            data["title"] = (
+                f"Replied to {post['reply']['parent']['author']['handle']}: "
+            )
+    else:
+        data["title"] = ""
+    if "text" in post["record"]:
+        data["title"] += post["record"]["text"]
+    return data
+
+
 def post_to_html(post, recurse=True):
     segments = []
-    if "text" in post:
-        text = post["text"]
+    if "reply" in post:
+        if "record" in post["reply"]["parent"]:
+            author = post["reply"]["parent"]["author"]
+            post_stub = post["reply"]["parent"]["uri"].split("/")[-1]
+            segments.append(
+                {
+                    "type": "quotepost",
+                    "handle": author["handle"],
+                    "date": post["reply"]["parent"]["record"]["createdAt"],
+                    # FIXME: improve this hardcoded link?
+                    "url": f"{PROFILE_URL}/{author['did']}/post/{post_stub}",
+                    "html": post_to_html(post["reply"]["parent"], False),
+                }
+            )
+
+    if "record" in post and "text" in post["record"]:
+        text = post["record"]["text"]
         cursor = 0
         if "facets" in post:
             # FIXME: round-trip encoding sucks a lot, but is hard to avoid...
@@ -194,47 +245,51 @@ def post_to_html(post, recurse=True):
         else:
             segments.append({"type": "text", "value": text})
 
+    embeds = []
     if "embed" in post:
-        media_embeds = get_media_embeds(post["embed"])
+        embeds = [post["embed"]]
+    elif "embeds" in post:
+        embeds = post["embeds"]
+
+    for embed in embeds:
+        media_embeds = get_media_embeds(embed)
         if media_embeds:
             segments.extend(media_embeds)
-        elif post["embed"]["$type"] == "app.bsky.embed.external#view":
+        elif embed["$type"] == "app.bsky.embed.external#view":
             segments.append(
                 {
                     "type": "extlink",
-                    "thumbnail": post["embed"]["external"].get("thumb", ""),
-                    "url": post["embed"]["external"]["uri"],
-                    "text": post["embed"]["external"]["title"],
-                    "description": post["embed"]["external"]["description"],
+                    "thumbnail": embed["external"].get("thumb", ""),
+                    "url": embed["external"]["uri"],
+                    "text": embed["external"]["title"],
+                    "description": embed["external"]["description"],
                 }
             )
         elif (
             recurse
             and (
-                post["embed"]["$type"] == "app.bsky.embed.record#view"
-                or post["embed"]["$type"] == "app.bsky.embed.recordWithMedia#view"
+                embed["$type"] == "app.bsky.embed.record#view"
+                or embed["$type"] == "app.bsky.embed.recordWithMedia#view"
             )
-            and (
-                "notFound" not in post["embed"]["record"]
-                or not post["embed"]["record"]["notFound"]
-            )
+            and ("notFound" not in embed["record"] or not embed["record"]["notFound"])
         ):
             # image or video quoted-posted
-            if post["embed"]["$type"] == "app.bsky.embed.recordWithMedia#view":
-                segments.extend(get_media_embeds(post["embed"]["media"]))
-                post["embed"]["record"] = post["embed"]["record"]["record"]
+            if embed["$type"] == "app.bsky.embed.recordWithMedia#view":
+                segments.extend(get_media_embeds(embed["media"]))
+                embed["record"] = embed["record"]["record"]
             # some unhandled embeds, like starter packs, don't have authors
-            if "author" in post["embed"]["record"]:
-                author = post["embed"]["record"]["author"]
-                post_stub = post["embed"]["record"]["uri"].split("/")[-1]
+            if "author" in embed["record"]:
+                author = embed["record"]["author"]
+                post_stub = embed["record"]["uri"].split("/")[-1]
+                embed["record"]["record"] = embed["record"]["value"]
                 segments.append(
                     {
                         "type": "quotepost",
                         "handle": author["handle"],
-                        "date": post["embed"]["record"]["value"]["createdAt"],
+                        "date": embed["record"]["value"]["createdAt"],
                         # FIXME: improve this hardcoded link?
                         "url": f"{PROFILE_URL}/{author['did']}/post/{post_stub}",
-                        "html": post_to_html(post["embed"]["record"]["value"], False),
+                        "html": post_to_html(embed["record"], False),
                     }
                 )
 
@@ -313,7 +368,7 @@ def actorfeed(actor: str) -> Response:
         profile = {
             "did": actor,
             "handle": profile["handle"],
-            "name": author,
+            "name": author or profile["handle"],
             "avatar": avatar,
             "description": description,
             "updated": now.isoformat(),
@@ -347,17 +402,19 @@ def actorfeed(actor: str) -> Response:
         postdata = postdata.fetchone()
         if not postdata[0]:
             html = post_to_html(post)
+            post_metadata = get_post_metadata(post)
             data = {
                 "cid": cid,
                 "did": actor,
-                "url": post["url"],
+                "url": post_metadata["url"],
                 "html": html,
-                "date": post["date"].isoformat(),
-                "handle": post["author"],
-                "name": post["authorName"],
+                "date": post_metadata["date"].isoformat(),
+                "handle": post_metadata["author"],
+                "name": post_metadata["authorName"],
+                "title": post_metadata["title"],
             }
             curs.execute(
-                "INSERT INTO posts VALUES(:cid, :did, :url, :html, :date, :handle, :name)",
+                "INSERT INTO posts VALUES(:cid, :did, :url, :html, :date, :handle, :name, :title)",
                 data,
             )
             conn.commit()
@@ -376,7 +433,8 @@ def actorfeed(actor: str) -> Response:
                 "url": post[2],
                 "html": post[3],
                 "date": post[4],
-                "author": post[6],
+                "author": post[6] or post[5],
+                "title": post[7],
             }
         )
 

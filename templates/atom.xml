@@ -12,7 +12,7 @@
   <entry>
     <id>cid:{{ post["cid"] }}</id>
     <link href="{{ post["url"]}}" rel="alternate"/>
-    <title>Post by {{ post["author"] }}</title>
+    <title>{{ post["title"] }}</title>
     <updated>{{ post["date"] }}</updated>
     <author>
       <name>{{ post["author"] }}</name>

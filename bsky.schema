@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS "posts" (
         "date"  TEXT NOT NULL,
         "handle"        TEXT NOT NULL,
         "name"  TEXT NOT NULL,
+        "title" TEXT NOT NULL,
         PRIMARY KEY("cid")
 );
 CREATE TABLE IF NOT EXISTS "profiles" (
