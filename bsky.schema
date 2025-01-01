@@ -22,7 +22,13 @@ CREATE TABLE IF NOT EXISTS "profiles" (
         "avatar"        TEXT,
         "description"   TEXT,
         "updated"       TEXT,
-        "fetched"       TEXT,
         PRIMARY KEY("did")
+);
+CREATE TABLE IF NOT EXISTS "fetches" (
+        "did"   TEXT NOT NULL,
+        "filter"        TEXT NOT NULL,
+        "fetched"       TEXT,
+        PRIMARY KEY("did", "filter"),
+        UNIQUE ("did", "filter") ON CONFLICT REPLACE
 );
 COMMIT;

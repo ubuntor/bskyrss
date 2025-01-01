@@ -1,5 +1,6 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
-  <id>{{ profile["did"] }}</id>
+  <id>{{ profile["did"] }}?filter={{ feed["post_filter"] }}</id>
+  <link href="{{ feed["url"] }}" rel="self"/>
   <link href="{{ profile["url"] }}" rel="alternate"/>
   <title>{{ profile["name"] }}</title>
   <updated>{{ profile["updated"] }}</updated>

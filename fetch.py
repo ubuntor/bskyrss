@@ -34,6 +34,13 @@ BSKY_PUBLIC_API = "https://public.api.bsky.app/xrpc"
 VALID_HANDLE_REGEX = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"
 )
+VALID_FILTERS = [
+    "posts_and_author_threads",
+    "posts_with_replies",
+    "posts_no_replies",
+    "posts_with_media",
+]
+DEFAULT_FILTER = "posts_and_author_threads"
 
 app = Flask(__name__)
 iso = datetime.fromisoformat
@@ -43,11 +50,11 @@ class BskyXrpcClient:
     def __init__(self):
         self.s = requests.Session()
 
-    def get_posts(self, actor, server_url=BSKY_PUBLIC_API, last=None):
+    def get_posts(self, actor, post_filter, server_url=BSKY_PUBLIC_API, last=None):
         url = f"{server_url}/app.bsky.feed.getAuthorFeed"
         params = {
             "actor": actor,
-            "filter": "posts_and_author_threads",
+            "filter": post_filter,
             "limit": 30,
         }
 
@@ -237,12 +244,35 @@ def post_to_html(post, recurse=True):
 def actorfeed(actor: str) -> Response:
     client = get_client()
 
-    # check last time actor feed was updated
+    post_filter = request.args.get("filter", DEFAULT_FILTER)
+    if post_filter not in VALID_FILTERS:
+        abort(400)
+
     conn = get_db()
     curs = conn.cursor()
+    now = datetime.now(timezone.utc)
+
+    res = curs.execute(
+        "SELECT fetched FROM fetches WHERE did = ? AND filter = ?", (actor, post_filter)
+    ).fetchone()
+    if res:
+        fetched = iso(res[0])
+        # if fetched less than an hour ago, return cached file
+        post_age = (now - fetched).total_seconds()
+        if post_age < CACHE_POSTS_SECS:
+            try:
+                return send_from_directory(
+                    CACHE_DIR,
+                    f"{actor}.{post_filter}.atom.xml",
+                    max_age=CACHE_POSTS_SECS - post_age + 1,
+                    mimetype="application/atom+xml",
+                )
+            except NotFound:
+                pass
+
+    # check last time actor feed was updated
     res = curs.execute("SELECT * FROM profiles WHERE did = ?", (actor,))
     res = res.fetchone()
-    now = datetime.now(timezone.utc)
     fetched = None
 
     # we know about this actor already
@@ -254,21 +284,7 @@ def actorfeed(actor: str) -> Response:
             "avatar": res[3],
             "description": res[4],
             "updated": res[5],
-            "fetched": res[6],
         }
-
-        # if updated less than an hour ago, return cached file
-        post_age = (now - iso(profile["fetched"])).total_seconds()
-        if profile["fetched"] and post_age < CACHE_POSTS_SECS:
-            try:
-                return send_from_directory(
-                    CACHE_DIR,
-                    f"{actor}.atom.xml",
-                    max_age=CACHE_POSTS_SECS - post_age + 1,
-                    mimetype="application/atom+xml",
-                )
-            except NotFound:
-                pass
 
     # never fetched before, verify actor and fetch posts
     if (
@@ -301,10 +317,9 @@ def actorfeed(actor: str) -> Response:
             "avatar": avatar,
             "description": description,
             "updated": now.isoformat(),
-            "fetched": None,
         }
         curs.execute(
-            "INSERT OR REPLACE INTO profiles VALUES(:did, :handle, :name, :avatar, :description, :updated, :fetched)",
+            "INSERT OR REPLACE INTO profiles VALUES(:did, :handle, :name, :avatar, :description, :updated)",
             profile,
         )
         conn.commit()
@@ -313,14 +328,15 @@ def actorfeed(actor: str) -> Response:
     profile["url"] = f"{PROFILE_URL}/{profile['did']}"
 
     try:
-        posts = client.get_posts(actor, last=fetched)
+        posts = client.get_posts(actor, post_filter, last=fetched)
     except requests.HTTPError:
         abort(404)
 
     if not posts:
         abort(404)
 
-    curs.execute("UPDATE profiles SET fetched = ? WHERE did = ?", (now, actor))
+    data = {"did": actor, "filter": post_filter, "fetched": now}
+    curs.execute("INSERT OR REPLACE INTO fetches VALUES(:did, :filter, :fetched)", data)
     conn.commit()
 
     for cid, post in posts.items():
@@ -364,14 +380,21 @@ def actorfeed(actor: str) -> Response:
             }
         )
 
-    ofs = render_template("atom.xml", profile=profile, posts=posts_data).encode("utf-8")
+    feed_data = {
+        "post_filter": post_filter,
+        "url": request.url_root + f"actor/{actor}?filter={post_filter}",
+    }
 
-    with open(f"{CACHE_DIR}/{actor}.atom.xml", "wb") as f:
+    ofs = render_template(
+        "atom.xml", profile=profile, posts=posts_data, feed=feed_data
+    ).encode("utf-8")
+
+    with open(f"{CACHE_DIR}/{actor}.{post_filter}.atom.xml", "wb") as f:
         f.write(ofs)
 
     return send_from_directory(
         CACHE_DIR,
-        f"{actor}.atom.xml",
+        f"{actor}.{post_filter}.atom.xml",
         max_age=CACHE_POSTS_SECS + 1,
         mimetype="application/atom+xml",
     )
