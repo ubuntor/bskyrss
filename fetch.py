@@ -3,6 +3,7 @@
 import re
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 from flask import (
@@ -44,7 +45,7 @@ DEFAULT_FILTER = "posts_and_author_threads"
 
 app = Flask(__name__)
 iso = datetime.fromisoformat
-
+Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
 class BskyXrpcClient:
     def __init__(self):
@@ -394,6 +395,7 @@ def actorfeed(actor: str) -> Response:
     curs.execute("INSERT OR REPLACE INTO fetches VALUES(:did, :filter, :fetched)", data)
     conn.commit()
 
+    print(post_filter, list(posts))
     for cid, post in posts.items():
         # FIXME: look into updating edited posts
         postdata = curs.execute(
@@ -414,13 +416,20 @@ def actorfeed(actor: str) -> Response:
                 "title": post_metadata["title"],
             }
             curs.execute(
-                "INSERT INTO posts VALUES(:cid, :did, :url, :html, :date, :handle, :name, :title)",
+                "INSERT INTO posts VALUES(:cid, :did, :url, :html, :date, :handle, :name, :title, 0, 0, 0, 0)",
                 data,
             )
             conn.commit()
+        # FIXME: this feels bad, but i need to parameterize over a column name...
+        curs.execute(
+            f"UPDATE posts SET filter_{post_filter} = 1 WHERE cid = ?",
+            (cid,),
+        )
+        conn.commit()
 
     posts = curs.execute(
-        "SELECT * FROM posts WHERE did = ? ORDER BY date DESC LIMIT 100", (actor,)
+        f"SELECT * FROM posts WHERE did = ? AND filter_{post_filter} = 1 ORDER BY date DESC LIMIT 100",
+        (actor,),
     )
     posts = posts.fetchall()
 

@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS "posts" (
         "handle"        TEXT NOT NULL,
         "name"  TEXT NOT NULL,
         "title" TEXT NOT NULL,
+        "filter_posts_and_author_threads" INTEGER NOT NULL,
+        "filter_posts_with_replies" INTEGER NOT NULL,
+        "filter_posts_no_replies" INTEGER NOT NULL,
+        "filter_posts_with_media" INTEGER NOT NULL,
         PRIMARY KEY("cid")
 );
 CREATE TABLE IF NOT EXISTS "profiles" (
