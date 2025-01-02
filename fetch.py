@@ -47,6 +47,7 @@ app = Flask(__name__)
 iso = datetime.fromisoformat
 Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
+
 class BskyXrpcClient:
     def __init__(self):
         self.s = requests.Session()
@@ -103,6 +104,12 @@ class BskyXrpcClient:
         return r.json()
 
 
+def format_author(display_name, handle):
+    if not display_name:
+        return handle
+    return f"{display_name} ({handle})"
+
+
 def get_media_embeds(embed):
     embeds = []
     if embed["$type"] == "app.bsky.embed.images#view":
@@ -142,7 +149,8 @@ def get_post_metadata(post):
         "reason" in post
         and post["reason"]["$type"] == "app.bsky.feed.defs#reasonRepost"
     ):
-        data["title"] = f"Reposted {post['author']['handle']}: "
+        author = format_author(post["author"]["displayName"], post["author"]["handle"])
+        data["title"] = f"Reposted {author}: "
     elif "embed" in post and "record" in post["embed"]:
         match post["embed"]["record"]["$type"]:
             case "app.bsky.embed.record#viewNotFound":
@@ -151,18 +159,22 @@ def get_post_metadata(post):
                 data["title"] = f"Quoted detached post: "
             case _:
                 if "author" in post["embed"]["record"]:
-                    data["title"] = (
-                        f"Quoted {post['embed']['record']['author']['handle']}: "
+                    author = format_author(
+                        post["embed"]["record"]["author"]["displayName"],
+                        post["embed"]["record"]["author"]["handle"],
                     )
+                    data["title"] = f"Quoted {author}: "
                 else:
                     data["title"] = ""
     elif "reply" in post:
         if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
             data["title"] = "Replied to deleted post: "
         else:
-            data["title"] = (
-                f"Replied to {post['reply']['parent']['author']['handle']}: "
+            author = format_author(
+                post["reply"]["parent"]["author"]["displayName"],
+                post["reply"]["parent"]["author"]["handle"],
             )
+            data["title"] = f"Replied to {author}: "
     else:
         data["title"] = ""
     if "text" in post["record"]:
@@ -172,28 +184,16 @@ def get_post_metadata(post):
 
 def post_to_html(post, recurse=True):
     segments = []
-    if "reply" in post:
-        if "record" in post["reply"]["parent"]:
-            author = post["reply"]["parent"]["author"]
-            post_stub = post["reply"]["parent"]["uri"].split("/")[-1]
-            segments.append(
-                {
-                    "type": "quotepost",
-                    "handle": author["handle"],
-                    "date": post["reply"]["parent"]["record"]["createdAt"],
-                    # FIXME: improve this hardcoded link?
-                    "url": f"{PROFILE_URL}/{author['did']}/post/{post_stub}",
-                    "html": post_to_html(post["reply"]["parent"], False),
-                }
-            )
 
     if "record" in post and "text" in post["record"]:
         text = post["record"]["text"]
         cursor = 0
-        if "facets" in post:
+        if "facets" in post["record"]:
             # FIXME: round-trip encoding sucks a lot, but is hard to avoid...
             btext = text.encode("utf-8")
-            for facet in sorted(post["facets"], key=lambda x: x["index"]["byteStart"]):
+            for facet in sorted(
+                post["record"]["facets"], key=lambda x: x["index"]["byteStart"]
+            ):
                 if facet["features"][0]["$type"] == "app.bsky.richtext.facet#link":
                     segments.append(
                         {
@@ -283,16 +283,33 @@ def post_to_html(post, recurse=True):
                 author = embed["record"]["author"]
                 post_stub = embed["record"]["uri"].split("/")[-1]
                 embed["record"]["record"] = embed["record"]["value"]
-                segments.append(
+                segments.insert(
+                    0,
                     {
                         "type": "quotepost",
-                        "handle": author["handle"],
+                        "name": format_author(author["displayName"], author["handle"]),
                         "date": embed["record"]["value"]["createdAt"],
                         # FIXME: improve this hardcoded link?
                         "url": f"{PROFILE_URL}/{author['did']}/post/{post_stub}",
                         "html": post_to_html(embed["record"], False),
-                    }
+                    },
                 )
+
+    if "reply" in post:
+        if "record" in post["reply"]["parent"]:
+            author = post["reply"]["parent"]["author"]
+            post_stub = post["reply"]["parent"]["uri"].split("/")[-1]
+            segments.insert(
+                0,
+                {
+                    "type": "reply",
+                    "name": format_author(author["displayName"], author["handle"]),
+                    "date": post["reply"]["parent"]["record"]["createdAt"],
+                    # FIXME: improve this hardcoded link?
+                    "url": f"{PROFILE_URL}/{author['did']}/post/{post_stub}",
+                    "html": post_to_html(post["reply"]["parent"], False),
+                },
+            )
 
     return render_template("post.html", segments=segments)
 
@@ -369,7 +386,7 @@ def actorfeed(actor: str) -> Response:
         profile = {
             "did": actor,
             "handle": profile["handle"],
-            "name": author or profile["handle"],
+            "name": format_author(author, profile["handle"]),
             "avatar": avatar,
             "description": description,
             "updated": now.isoformat(),
@@ -442,7 +459,7 @@ def actorfeed(actor: str) -> Response:
                 "url": post[2],
                 "html": post[3],
                 "date": post[4],
-                "author": post[6] or post[5],
+                "author": format_author(post[6], post[5]),
                 "title": post[7],
             }
         )
