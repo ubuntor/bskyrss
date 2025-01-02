@@ -448,6 +448,7 @@ def actorfeed(actor: str) -> Response:
         }
         for f in VALID_FILTERS:
             data["filter_" + f] = f == post_filter
+        # dedup self-reposts in favor of the repost
         curs.execute(
             f"INSERT into feed_items VALUES(:did, :cid, :updated, :is_repost, :filter_posts_and_author_threads, :filter_posts_with_replies, :filter_posts_no_replies, :filter_posts_with_media) ON CONFLICT DO UPDATE SET filter_{post_filter} = 1, updated = max(updated, :updated)",
             data,
