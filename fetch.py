@@ -262,8 +262,9 @@ def post_to_html(post, recurse=True):
                     "type": "extlink",
                     "thumbnail": embed["external"].get("thumb", ""),
                     "url": embed["external"]["uri"],
-                    "text": embed["external"]["title"],
-                    "description": embed["external"]["description"],
+                    "text": embed["external"]["title"] or embed["external"]["uri"],
+                    "description": embed["external"]["description"]
+                    or embed["external"]["uri"],
                 }
             )
         elif (
