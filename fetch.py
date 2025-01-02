@@ -135,7 +135,7 @@ def get_media_embeds(embed):
     return embeds
 
 
-def get_post_metadata(post):
+def get_post_metadata(post, actor):
     post_stub = post["uri"].split("/")[-1]
     original_date = iso(post["record"]["createdAt"])
     data = {
@@ -158,6 +158,8 @@ def get_post_metadata(post):
     if "reply" in post:
         if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
             data["title"] = "Replied to deleted post: "
+        elif post["reply"]["parent"]["author"]["did"] == actor:
+            data["title"] = f"Self-replied: "
         else:
             author = format_author(
                 post["reply"]["parent"]["author"]["displayName"],
@@ -176,11 +178,15 @@ def get_post_metadata(post):
                 data["title"] = f"Quoted detached post: "
             case _:
                 if "author" in record:
-                    author = format_author(
-                        record["author"]["displayName"],
-                        record["author"]["handle"],
-                    )
-                    data["title"] = f"Quoted {author}: "
+                    if record["author"]["did"] == actor:
+                        data["title"] = f"Self-quoted: "
+                    else:
+                        author = format_author(
+                            record["author"]["displayName"],
+                            record["author"]["handle"],
+                        )
+                        data["title"] = f"Quoted {author}: "
+
                 else:
                     data["title"] = ""
     else:
@@ -418,7 +424,7 @@ def actorfeed(actor: str) -> Response:
     conn.commit()
 
     for post in posts:
-        post_metadata = get_post_metadata(post)
+        post_metadata = get_post_metadata(post, actor)
         # FIXME: look into updating edited posts
         postdata = curs.execute(
             "SELECT EXISTS(SELECT 1 FROM posts WHERE cid = ?)", (post["cid"],)
@@ -456,7 +462,7 @@ def actorfeed(actor: str) -> Response:
     conn.commit()
 
     posts = curs.execute(
-        f"SELECT posts.cid, posts.url, posts.html, posts.date, posts.handle, posts.name, posts.title, feed_items.updated, feed_items.is_repost FROM feed_items INNER JOIN posts USING (cid) WHERE feed_items.did = ? AND filter_{post_filter} = 1 ORDER BY updated DESC LIMIT 100",
+        f"SELECT posts.cid, posts.did, posts.url, posts.html, posts.date, posts.handle, posts.name, posts.title, feed_items.updated, feed_items.is_repost FROM feed_items INNER JOIN posts USING (cid) WHERE feed_items.did = ? AND filter_{post_filter} = 1 ORDER BY updated DESC LIMIT 100",
         (actor,),
     )
     posts = posts.fetchall()
@@ -464,17 +470,20 @@ def actorfeed(actor: str) -> Response:
     posts_data = []
 
     for post in posts:
-        author = format_author(post[5], post[4])
-        title = post[6]
-        if post[8]:
-            title = f"Reposted {author}: {title}"
+        author = format_author(post[6], post[5])
+        title = post[7]
+        if post[9]:
+            if post[1] == actor:
+                title = f"Self-reposted: {title}"
+            else:
+                title = f"Reposted {author}: {title}"
         posts_data.append(
             {
                 "cid": post[0],
-                "url": post[1],
-                "html": post[2],
-                "date": post[3],
-                "updated": post[7],
+                "url": post[2],
+                "html": post[3],
+                "date": post[4],
+                "updated": post[8],
                 "author": author,
                 "title": title,
             }
