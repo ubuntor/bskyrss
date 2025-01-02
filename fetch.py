@@ -169,18 +169,16 @@ def get_post_metadata(post):
             record = post["embed"]["record"]
         elif post["embed"]["$type"] == "app.bsky.embed.recordWithMedia#view":
             record = post["embed"]["record"]["record"]
-        else:
-            1 / 0
         match record["$type"]:
             case "app.bsky.embed.record#viewNotFound":
                 data["title"] = f"Quoted deleted post: "
             case "app.bsky.embed.record#viewDetached":
                 data["title"] = f"Quoted detached post: "
             case _:
-                if "author" in post["embed"]["record"]:
+                if "author" in record:
                     author = format_author(
-                        post["embed"]["record"]["author"]["displayName"],
-                        post["embed"]["record"]["author"]["handle"],
+                        record["author"]["displayName"],
+                        record["author"]["handle"],
                     )
                     data["title"] = f"Quoted {author}: "
                 else:
