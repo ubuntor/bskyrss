@@ -1,39 +1,47 @@
 BEGIN;
 CREATE TABLE IF NOT EXISTS "handles" (
-        "handle"        TEXT NOT NULL UNIQUE,
-        "did"   TEXT,
-        "updated"       TEXT,
-        PRIMARY KEY("handle")
+    "handle" TEXT NOT NULL UNIQUE,
+    "did" TEXT,
+    "updated" TEXT,
+    PRIMARY KEY ("handle")
 );
 CREATE TABLE IF NOT EXISTS "posts" (
-        "cid"   TEXT NOT NULL UNIQUE,
-        "did"   TEXT NOT NULL,
-        "url"   TEXT NOT NULL,
-        "html"  TEXT NOT NULL,
-        "date"  TEXT NOT NULL,
-        "handle"        TEXT NOT NULL,
-        "name"  TEXT NOT NULL,
-        "title" TEXT NOT NULL,
-        "filter_posts_and_author_threads" INTEGER NOT NULL,
-        "filter_posts_with_replies" INTEGER NOT NULL,
-        "filter_posts_no_replies" INTEGER NOT NULL,
-        "filter_posts_with_media" INTEGER NOT NULL,
-        PRIMARY KEY("cid")
+    "cid" TEXT NOT NULL UNIQUE,
+    "did" TEXT NOT NULL,
+    "url" TEXT NOT NULL,
+    "html" TEXT NOT NULL,
+    "date" TEXT NOT NULL,
+    "handle" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    PRIMARY KEY ("cid")
+);
+-- reposts mean cids are no longer unique across feed items...
+CREATE TABLE IF NOT EXISTS "feed_items" (
+    "did" TEXT NOT NULL,
+    "updated" TEXT NOT NULL,
+    "cid" TEXT NOT NULL,
+    "is_repost" INTEGER NOT NULL,
+    "filter_posts_and_author_threads" INTEGER NOT NULL,
+    "filter_posts_with_replies" INTEGER NOT NULL,
+    "filter_posts_no_replies" INTEGER NOT NULL,
+    "filter_posts_with_media" INTEGER NOT NULL,
+    PRIMARY KEY ("did", "updated")
 );
 CREATE TABLE IF NOT EXISTS "profiles" (
-        "did"   TEXT NOT NULL UNIQUE,
-        "handle"        TEXT,
-        "name"  TEXT,
-        "avatar"        TEXT,
-        "description"   TEXT,
-        "updated"       TEXT,
-        PRIMARY KEY("did")
+    "did" TEXT NOT NULL UNIQUE,
+    "handle" TEXT,
+    "name" TEXT,
+    "avatar" TEXT,
+    "description" TEXT,
+    "updated" TEXT,
+    PRIMARY KEY ("did")
 );
 CREATE TABLE IF NOT EXISTS "fetches" (
-        "did"   TEXT NOT NULL,
-        "filter"        TEXT NOT NULL,
-        "fetched"       TEXT,
-        PRIMARY KEY("did", "filter"),
-        UNIQUE ("did", "filter") ON CONFLICT REPLACE
+    "did" TEXT NOT NULL,
+    "filter" TEXT NOT NULL,
+    "fetched" TEXT,
+    PRIMARY KEY ("did", "filter"),
+    UNIQUE ("did", "filter") ON CONFLICT REPLACE
 );
 COMMIT;

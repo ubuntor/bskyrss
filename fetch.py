@@ -61,7 +61,7 @@ class BskyXrpcClient:
         }
 
         now = datetime.now(timezone.utc)
-        posts = {}
+        posts = []
         while True:
             r = self.s.get(url, params=params)
             r.raise_for_status()
@@ -75,8 +75,9 @@ class BskyXrpcClient:
                     post["reply"] = item["reply"]
                 if "reason" in item:
                     post["reason"] = item["reason"]
-                posts[post["cid"]] = post
+                posts.append(post)
 
+            # FIXME: implement last
             if not last:
                 return posts
 
@@ -136,23 +137,41 @@ def get_media_embeds(embed):
 
 def get_post_metadata(post):
     post_stub = post["uri"].split("/")[-1]
+    original_date = iso(post["record"]["createdAt"])
     data = {
-        "author": post["author"]["handle"],
+        "author": post["author"]["did"],
+        "authorHandle": post["author"]["handle"],
         "authorName": post["author"]["displayName"],
-        "date": iso(post["record"]["createdAt"]),
+        "original_date": original_date,
         "text": post["record"]["text"],
-        "record": post["record"],
         # FIXME: improve this hardcoded link?
         "url": f"{PROFILE_URL}/{post['author']['did']}/post/{post_stub}",
     }
-    if (
-        "reason" in post
-        and post["reason"]["$type"] == "app.bsky.feed.defs#reasonRepost"
-    ):
-        author = format_author(post["author"]["displayName"], post["author"]["handle"])
-        data["title"] = f"Reposted {author}: "
+    if "reason" in post and "by" in post["reason"]:
+        # FIXME: we don't have the repost date... https://github.com/bluesky-social/atproto/discussions/2702
+        # using indexedAt as the next best thing
+        data["date"] = iso(post["reason"]["indexedAt"])
+        data["is_repost"] = True
+    else:
+        data["date"] = original_date
+        data["is_repost"] = False
+    if "reply" in post:
+        if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
+            data["title"] = "Replied to deleted post: "
+        else:
+            author = format_author(
+                post["reply"]["parent"]["author"]["displayName"],
+                post["reply"]["parent"]["author"]["handle"],
+            )
+            data["title"] = f"Replied to {author}: "
     elif "embed" in post and "record" in post["embed"]:
-        match post["embed"]["record"]["$type"]:
+        if post["embed"]["$type"] == "app.bsky.embed.record#view":
+            record = post["embed"]["record"]
+        elif post["embed"]["$type"] == "app.bsky.embed.recordWithMedia#view":
+            record = post["embed"]["record"]["record"]
+        else:
+            1 / 0
+        match record["$type"]:
             case "app.bsky.embed.record#viewNotFound":
                 data["title"] = f"Quoted deleted post: "
             case "app.bsky.embed.record#viewDetached":
@@ -166,15 +185,6 @@ def get_post_metadata(post):
                     data["title"] = f"Quoted {author}: "
                 else:
                     data["title"] = ""
-    elif "reply" in post:
-        if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
-            data["title"] = "Replied to deleted post: "
-        else:
-            author = format_author(
-                post["reply"]["parent"]["author"]["displayName"],
-                post["reply"]["parent"]["author"]["handle"],
-            )
-            data["title"] = f"Replied to {author}: "
     else:
         data["title"] = ""
     if "text" in post["record"]:
@@ -413,40 +423,45 @@ def actorfeed(actor: str) -> Response:
     curs.execute("INSERT OR REPLACE INTO fetches VALUES(:did, :filter, :fetched)", data)
     conn.commit()
 
-    print(post_filter, list(posts))
-    for cid, post in posts.items():
+    for post in posts:
+        post_metadata = get_post_metadata(post)
         # FIXME: look into updating edited posts
         postdata = curs.execute(
-            "SELECT EXISTS(SELECT 1 FROM posts WHERE cid = ?)", (cid,)
+            "SELECT EXISTS(SELECT 1 FROM posts WHERE cid = ?)", (post["cid"],)
         )
         postdata = postdata.fetchone()
         if not postdata[0]:
             html = post_to_html(post)
-            post_metadata = get_post_metadata(post)
             data = {
-                "cid": cid,
-                "did": actor,
+                "cid": post["cid"],
+                "did": post_metadata["author"],
                 "url": post_metadata["url"],
                 "html": html,
-                "date": post_metadata["date"].isoformat(),
-                "handle": post_metadata["author"],
+                "date": post_metadata["original_date"].isoformat(),
+                "handle": post_metadata["authorHandle"],
                 "name": post_metadata["authorName"],
                 "title": post_metadata["title"],
             }
             curs.execute(
-                "INSERT INTO posts VALUES(:cid, :did, :url, :html, :date, :handle, :name, :title, 0, 0, 0, 0)",
+                "INSERT INTO posts VALUES(:cid, :did, :url, :html, :date, :handle, :name, :title)",
                 data,
             )
-            conn.commit()
-        # FIXME: this feels bad, but i need to parameterize over a column name...
+        data = {
+            "did": actor,
+            "updated": post_metadata["date"].isoformat(),
+            "cid": post["cid"],
+            "is_repost": post_metadata["is_repost"],
+        }
+        for f in VALID_FILTERS:
+            data["filter_" + f] = f == post_filter
         curs.execute(
-            f"UPDATE posts SET filter_{post_filter} = 1 WHERE cid = ?",
-            (cid,),
+            f"INSERT into feed_items VALUES(:did, :updated, :cid, :is_repost, :filter_posts_and_author_threads, :filter_posts_with_replies, :filter_posts_no_replies, :filter_posts_with_media) ON CONFLICT DO UPDATE SET filter_{post_filter} = 1",
+            data,
         )
-        conn.commit()
+    conn.commit()
 
     posts = curs.execute(
-        f"SELECT * FROM posts WHERE did = ? AND filter_{post_filter} = 1 ORDER BY date DESC LIMIT 100",
+        f"SELECT posts.cid, posts.url, posts.html, posts.date, posts.handle, posts.name, posts.title, feed_items.updated, feed_items.is_repost FROM feed_items INNER JOIN posts USING (cid) WHERE feed_items.did = ? AND filter_{post_filter} = 1 ORDER BY updated DESC LIMIT 100",
         (actor,),
     )
     posts = posts.fetchall()
@@ -454,14 +469,19 @@ def actorfeed(actor: str) -> Response:
     posts_data = []
 
     for post in posts:
+        author = format_author(post[5], post[4])
+        title = post[6]
+        if post[8]:
+            title = f"Reposted {author}: {title}"
         posts_data.append(
             {
                 "cid": post[0],
-                "url": post[2],
-                "html": post[3],
-                "date": post[4],
-                "author": format_author(post[6], post[5]),
-                "title": post[7],
+                "url": post[1],
+                "html": post[2],
+                "date": post[3],
+                "updated": post[7],
+                "author": author,
+                "title": title,
             }
         )
 
