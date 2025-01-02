@@ -16,17 +16,16 @@ CREATE TABLE IF NOT EXISTS "posts" (
     "title" TEXT NOT NULL,
     PRIMARY KEY ("cid")
 );
--- reposts mean cids are no longer unique across feed items...
 CREATE TABLE IF NOT EXISTS "feed_items" (
     "did" TEXT NOT NULL,
-    "updated" TEXT NOT NULL,
     "cid" TEXT NOT NULL,
+    "updated" TEXT NOT NULL,
     "is_repost" INTEGER NOT NULL,
     "filter_posts_and_author_threads" INTEGER NOT NULL,
     "filter_posts_with_replies" INTEGER NOT NULL,
     "filter_posts_no_replies" INTEGER NOT NULL,
     "filter_posts_with_media" INTEGER NOT NULL,
-    PRIMARY KEY ("did", "updated")
+    PRIMARY KEY ("did", "cid")
 );
 CREATE TABLE IF NOT EXISTS "profiles" (
     "did" TEXT NOT NULL UNIQUE,

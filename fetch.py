@@ -276,19 +276,15 @@ def post_to_html(post, recurse=True):
                 }
             )
         elif (
-            recurse
-            and (
-                embed["$type"] == "app.bsky.embed.record#view"
-                or embed["$type"] == "app.bsky.embed.recordWithMedia#view"
-            )
-            and ("notFound" not in embed["record"] or not embed["record"]["notFound"])
-        ):
+            embed["$type"] == "app.bsky.embed.record#view"
+            or embed["$type"] == "app.bsky.embed.recordWithMedia#view"
+        ) and ("notFound" not in embed["record"] or not embed["record"]["notFound"]):
             # image or video quoted-posted
             if embed["$type"] == "app.bsky.embed.recordWithMedia#view":
                 segments.extend(get_media_embeds(embed["media"]))
                 embed["record"] = embed["record"]["record"]
             # some unhandled embeds, like starter packs, don't have authors
-            if "author" in embed["record"]:
+            if "author" in embed["record"] and recurse:
                 author = embed["record"]["author"]
                 post_stub = embed["record"]["uri"].split("/")[-1]
                 embed["record"]["record"] = embed["record"]["value"]
@@ -446,14 +442,14 @@ def actorfeed(actor: str) -> Response:
             )
         data = {
             "did": actor,
-            "updated": post_metadata["date"].isoformat(),
             "cid": post["cid"],
+            "updated": post_metadata["date"].isoformat(),
             "is_repost": post_metadata["is_repost"],
         }
         for f in VALID_FILTERS:
             data["filter_" + f] = f == post_filter
         curs.execute(
-            f"INSERT into feed_items VALUES(:did, :updated, :cid, :is_repost, :filter_posts_and_author_threads, :filter_posts_with_replies, :filter_posts_no_replies, :filter_posts_with_media) ON CONFLICT DO UPDATE SET filter_{post_filter} = 1",
+            f"INSERT into feed_items VALUES(:did, :cid, :updated, :is_repost, :filter_posts_and_author_threads, :filter_posts_with_replies, :filter_posts_no_replies, :filter_posts_with_media) ON CONFLICT DO UPDATE SET filter_{post_filter} = 1, updated = max(updated, :updated)",
             data,
         )
     conn.commit()
