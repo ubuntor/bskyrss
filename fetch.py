@@ -191,8 +191,15 @@ def get_post_metadata(post, actor):
                     data["title"] = ""
     else:
         data["title"] = ""
-    if "text" in post["record"]:
+    if "text" in post["record"] and post["record"]["text"] != "":
         data["title"] += post["record"]["text"]
+    elif "embed" in post:
+        # if no text, put a placeholder title
+        match post["embed"]["$type"]:
+            case "app.bsky.embed.images#view":
+                data["title"] += "(image)"
+            case "app.bsky.embed.video#view":
+                data["title"] += "(video)"
     return data
 
 
