@@ -25,6 +25,7 @@ CACHE_NONEXISTENT_HANDLES_SECS = 86400
 CACHE_POSTS_SECS = 3600
 CACHE_DIR = "cache"
 DATABASE = "bsky.db"
+MAX_POSTS_IN_FEED = 100
 
 # anti-feature?
 SKIP_AUTH_REQ_POSTS = False
@@ -158,6 +159,8 @@ def get_post_metadata(post, actor):
     if "reply" in post:
         if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
             data["title"] = "Replied to deleted post: "
+        if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#blockedPost":
+            data["title"] = "Replied to blocked post: "
         elif post["reply"]["parent"]["author"]["did"] == actor:
             data["title"] = f"Self-replied: "
         else:
@@ -176,6 +179,8 @@ def get_post_metadata(post, actor):
                 data["title"] = f"Quoted deleted post: "
             case "app.bsky.embed.record#viewDetached":
                 data["title"] = f"Quoted detached post: "
+            case "app.bsky.embed.record#viewBlocked":
+                data["title"] = f"Quoted blocked post: "
             case _:
                 if "author" in record:
                     if record["author"]["did"] == actor:
@@ -193,13 +198,12 @@ def get_post_metadata(post, actor):
         data["title"] = ""
     if "text" in post["record"] and post["record"]["text"] != "":
         data["title"] += post["record"]["text"]
-    elif "embed" in post:
-        # if no text, put a placeholder title
+    if "embed" in post:
         match post["embed"]["$type"]:
             case "app.bsky.embed.images#view":
-                data["title"] += "(image)"
+                data["title"] = "IMAGE: " + data["title"]
             case "app.bsky.embed.video#view":
-                data["title"] += "(video)"
+                data["title"] = "VIDEO: " + data["title"]
     return data
 
 
@@ -410,7 +414,8 @@ def actorfeed(actor: str) -> Response:
             "updated": now.isoformat(),
         }
         curs.execute(
-            "INSERT OR REPLACE INTO profiles VALUES(:did, :handle, :name, :avatar, :description, :updated)",
+            "INSERT OR REPLACE INTO profiles VALUES(:did, :handle, :name, :avatar,"
+            " :description, :updated)",
             profile,
         )
         conn.commit()
@@ -450,7 +455,8 @@ def actorfeed(actor: str) -> Response:
                 "title": post_metadata["title"],
             }
             curs.execute(
-                "INSERT INTO posts VALUES(:cid, :did, :url, :html, :date, :handle, :name, :title)",
+                "INSERT INTO posts VALUES(:cid, :did, :url, :html, :date, :handle,"
+                " :name, :title)",
                 data,
             )
         data = {
@@ -463,13 +469,19 @@ def actorfeed(actor: str) -> Response:
             data["filter_" + f] = f == post_filter
         # dedup self-reposts in favor of the repost
         curs.execute(
-            f"INSERT into feed_items VALUES(:did, :cid, :updated, :is_repost, :filter_posts_and_author_threads, :filter_posts_with_replies, :filter_posts_no_replies, :filter_posts_with_media) ON CONFLICT DO UPDATE SET filter_{post_filter} = 1, updated = max(updated, :updated)",
+            "INSERT into feed_items VALUES(:did, :cid, :updated, :is_repost,"
+            " :filter_posts_and_author_threads, :filter_posts_with_replies,"
+            " :filter_posts_no_replies, :filter_posts_with_media) ON CONFLICT DO"
+            f" UPDATE SET filter_{post_filter} = 1, updated = max(updated, :updated)",
             data,
         )
     conn.commit()
 
     posts = curs.execute(
-        f"SELECT posts.cid, posts.did, posts.url, posts.html, posts.date, posts.handle, posts.name, posts.title, feed_items.updated, feed_items.is_repost FROM feed_items INNER JOIN posts USING (cid) WHERE feed_items.did = ? AND filter_{post_filter} = 1 ORDER BY updated DESC LIMIT 100",
+        "SELECT posts.cid, posts.did, posts.url, posts.html, posts.date, posts.handle,"
+        " posts.name, posts.title, feed_items.updated, feed_items.is_repost FROM"
+        " feed_items INNER JOIN posts USING (cid) WHERE feed_items.did = ? AND"
+        f" filter_{post_filter} = 1 ORDER BY updated DESC LIMIT {MAX_POSTS_IN_FEED}",
         (actor,),
     )
     posts = posts.fetchall()
