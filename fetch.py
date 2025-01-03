@@ -159,7 +159,7 @@ def get_post_metadata(post, actor):
     if "reply" in post:
         if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
             data["title"] = "Replied to deleted post: "
-        if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#blockedPost":
+        elif post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#blockedPost":
             data["title"] = "Replied to blocked post: "
         elif post["reply"]["parent"]["author"]["did"] == actor:
             data["title"] = f"Self-replied: "
