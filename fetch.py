@@ -348,7 +348,8 @@ def post_to_html(post, author_did):
                 "app.bsky.embed.recordWithMedia",
             }:
                 segments.extend(get_media_embeds(embed["media"], author_did))
-                embed["record"] = embed["record"]["record"]
+                if "$type" not in embed["record"]:
+                    embed["record"] = embed["record"]["record"]
             # some unhandled embeds, like starter packs, don't have authors
             if "author" in embed["record"]:
                 author = embed["record"]["author"]
