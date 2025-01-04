@@ -17,7 +17,8 @@
     <updated>{{ post["updated"] }}</updated>
     <author>
       <name>{{ post["author"] }}</name>
-    </author>
+    </author>{% for category in post["categories"] %}
+    <category term="{{ category }}"/>{% endfor %}
     <content type="html">{{ post["html"] }}</content>
   </entry>{% endfor %}
 </feed>

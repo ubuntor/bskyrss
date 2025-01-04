@@ -117,7 +117,7 @@ def get_media_embeds(embed):
     if embed["$type"] == "app.bsky.embed.images#view":
         for image in embed["images"]:
             alt = image["alt"]
-            src = image["thumb"]
+            src = image["fullsize"]
             embeds.append(
                 {
                     "type": "image",
@@ -147,63 +147,75 @@ def get_post_metadata(post, actor):
         "text": post["record"]["text"],
         # FIXME: improve this hardcoded link?
         "url": f"{PROFILE_URL}/{post['author']['did']}/post/{post_stub}",
+        "categories": []
     }
     if "reason" in post and "by" in post["reason"]:
         # FIXME: we don't have the repost date... https://github.com/bluesky-social/atproto/discussions/2702
         # using indexedAt as the next best thing
         data["date"] = iso(post["reason"]["indexedAt"])
-        data["is_repost"] = True
+        if post["author"]["did"] == actor:
+            data["categories"].append("self-repost")
+        else:
+            data["categories"].append("repost")
     else:
         data["date"] = original_date
-        data["is_repost"] = False
+    data["title"] = ""
+    post_text = ""
+    if "text" in post["record"] and post["record"]["text"] != "":
+        post_text = post["record"]["text"]
     if "reply" in post:
         if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
             data["title"] = "Replied to deleted post: "
+            data["categories"].append("reply")
         elif post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#blockedPost":
             data["title"] = "Replied to blocked post: "
+            data["categories"].append("reply")
         elif post["reply"]["parent"]["author"]["did"] == actor:
             data["title"] = f"Self-replied: "
+            data["categories"].append("self-reply")
         else:
             author = format_author(
                 post["reply"]["parent"]["author"]["displayName"],
                 post["reply"]["parent"]["author"]["handle"],
             )
             data["title"] = f"Replied to {author}: "
-    elif "embed" in post and "record" in post["embed"]:
-        if post["embed"]["$type"] == "app.bsky.embed.record#view":
-            record = post["embed"]["record"]
-        elif post["embed"]["$type"] == "app.bsky.embed.recordWithMedia#view":
-            record = post["embed"]["record"]["record"]
-        match record["$type"]:
-            case "app.bsky.embed.record#viewNotFound":
-                data["title"] = f"Quoted deleted post: "
-            case "app.bsky.embed.record#viewDetached":
-                data["title"] = f"Quoted detached post: "
-            case "app.bsky.embed.record#viewBlocked":
-                data["title"] = f"Quoted blocked post: "
-            case _:
-                if "author" in record:
-                    if record["author"]["did"] == actor:
-                        data["title"] = f"Self-quoted: "
-                    else:
-                        author = format_author(
-                            record["author"]["displayName"],
-                            record["author"]["handle"],
-                        )
-                        data["title"] = f"Quoted {author}: "
+            data["categories"].append("reply")
 
-                else:
-                    data["title"] = ""
-    else:
-        data["title"] = ""
-    if "text" in post["record"] and post["record"]["text"] != "":
-        data["title"] += post["record"]["text"]
     if "embed" in post:
         match post["embed"]["$type"]:
             case "app.bsky.embed.images#view":
-                data["title"] = "IMAGE: " + data["title"]
+                data["categories"].append("image")
             case "app.bsky.embed.video#view":
-                data["title"] = "VIDEO: " + data["title"]
+                data["categories"].append("video")
+        if "record" in post["embed"]:
+            if post["embed"]["$type"] == "app.bsky.embed.record#view":
+                record = post["embed"]["record"]
+            elif post["embed"]["$type"] == "app.bsky.embed.recordWithMedia#view":
+                match post["embed"]["media"]["$type"]:
+                    case "app.bsky.embed.images#view":
+                        data["categories"].append("image")
+                    case "app.bsky.embed.video#view":
+                        data["categories"].append("video")
+                record = post["embed"]["record"]["record"]
+            match record["$type"]:
+                case "app.bsky.embed.record#viewNotFound" | "app.bsky.embed.record#viewDetached" | "app.bsky.embed.record#viewBlocked":
+                    data["categories"].append("quote")
+                case _:
+                    if "author" in record:
+                        if record["author"]["did"] == actor:
+                            data["categories"].append("self-quote")
+                        else:
+                            author = format_author(
+                                record["author"]["displayName"],
+                                record["author"]["handle"],
+                            )
+                            data["categories"].append("quote")
+    if post_text == "":
+        if "image" in data["categories"]:
+            post_text = "(image)"
+        if "video" in data["categories"]:
+            post_text = "(video)"
+    data["title"] += post_text
     return data
 
 
@@ -463,13 +475,13 @@ def actorfeed(actor: str) -> Response:
             "did": actor,
             "cid": post["cid"],
             "updated": post_metadata["date"].isoformat(),
-            "is_repost": post_metadata["is_repost"],
+            "categories": ",".join(post_metadata["categories"]),
         }
         for f in VALID_FILTERS:
             data["filter_" + f] = f == post_filter
         # dedup self-reposts in favor of the repost
         curs.execute(
-            "INSERT into feed_items VALUES(:did, :cid, :updated, :is_repost,"
+            "INSERT into feed_items VALUES(:did, :cid, :updated, :categories,"
             " :filter_posts_and_author_threads, :filter_posts_with_replies,"
             " :filter_posts_no_replies, :filter_posts_with_media) ON CONFLICT DO"
             f" UPDATE SET filter_{post_filter} = 1, updated = max(updated, :updated)",
@@ -479,7 +491,7 @@ def actorfeed(actor: str) -> Response:
 
     posts = curs.execute(
         "SELECT posts.cid, posts.did, posts.url, posts.html, posts.date, posts.handle,"
-        " posts.name, posts.title, feed_items.updated, feed_items.is_repost FROM"
+        " posts.name, posts.title, feed_items.updated, feed_items.categories FROM"
         " feed_items INNER JOIN posts USING (cid) WHERE feed_items.did = ? AND"
         f" filter_{post_filter} = 1 ORDER BY updated DESC LIMIT {MAX_POSTS_IN_FEED}",
         (actor,),
@@ -491,11 +503,11 @@ def actorfeed(actor: str) -> Response:
     for post in posts:
         author = format_author(post[6], post[5])
         title = post[7]
-        if post[9]:
-            if post[1] == actor:
-                title = f"Self-reposted: {title}"
-            else:
-                title = f"Reposted {author}: {title}"
+        categories = [] if post[9] == "" else post[9].split(",")
+        if "self-repost" in categories:
+            title = f"Self-reposted: {title}"
+        elif "repost" in categories:
+            title = f"Reposted {author}: {title}"
         posts_data.append(
             {
                 "cid": post[0],
@@ -505,6 +517,7 @@ def actorfeed(actor: str) -> Response:
                 "updated": post[8],
                 "author": author,
                 "title": title,
+                "categories": categories
             }
         )
 
