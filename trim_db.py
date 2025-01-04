@@ -3,21 +3,18 @@ from datetime import datetime, timezone
 
 from fetch import DATABASE, MAX_POSTS_IN_FEED, VALID_FILTERS
 
+log = lambda x: print(f"{datetime.now()}: {x}")
+
 conn = sqlite3.connect(DATABASE)
 curs = conn.cursor()
 now = datetime.now(timezone.utc)
 
-print(
-    f"{datetime.now()}: deleting users that haven't been fetched in a while and their"
-    " feeds..."
-)
+log("deleting users that haven't been fetched in a while and their feeds...")
+
 # TODO
 conn.commit()
 
-print(f"{datetime.now()}: deleting unused cache files...")
-# TODO
-
-print(f"{datetime.now()}: deleting old feed items that will never be served...")
+log("deleting old feed items that will never be served...")
 curs.execute(
     "DELETE FROM feed_items WHERE (did, cid) IN (SELECT did, cid FROM (SELECT did,"
     " cid, row_number() OVER (PARTITION BY did ORDER BY updated DESC) AS row_num FROM"
@@ -25,13 +22,16 @@ curs.execute(
 )
 conn.commit()
 
-print(f"{datetime.now()}: deleting unreferenced posts...")
+log("deleting unreferenced posts...")
 # TODO
 conn.commit()
 
-print(f"{datetime.now()}: vacuuming...")
+log("vacuuming...")
 curs.execute("VACUUM")
 conn.commit()
 
+log("deleting old cache files...")
+# TODO
+
 t = datetime.now(timezone.utc) - now
-print(f"{datetime.now()}: done! took {t}")
+log(f"done! took {t}")
