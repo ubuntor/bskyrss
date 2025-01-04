@@ -336,15 +336,12 @@ def post_to_html(post, author_did):
                     or embed["external"]["uri"],
                 }
             )
-        elif (
-            embed["$type"]
-            in {
-                "app.bsky.embed.record#view",
-                "app.bsky.embed.record",
-                "app.bsky.embed.recordWithMedia#view",
-                "app.bsky.embed.recordWithMedia",
-            }
-        ) and ("notFound" not in embed["record"] or not embed["record"]["notFound"]):
+        elif embed["$type"] in {
+            "app.bsky.embed.record#view",
+            "app.bsky.embed.record",
+            "app.bsky.embed.recordWithMedia#view",
+            "app.bsky.embed.recordWithMedia",
+        }:
             # image or video quoted-posted
             if embed["$type"] in {
                 "app.bsky.embed.recordWithMedia#view",
@@ -367,7 +364,22 @@ def post_to_html(post, author_did):
                         "html": post_to_html(embed["record"], author["did"]),
                     },
                 )
-
+            elif embed["record"]["$type"] == "app.bsky.embed.record#viewNotFound":
+                segments.insert(
+                    0,
+                    {
+                        "type": "placeholder",
+                        "text": "(quote of deleted post)",
+                    },
+                )
+            elif embed["record"]["$type"] == "app.bsky.embed.record#viewDetached":
+                segments.insert(
+                    0,
+                    {
+                        "type": "placeholder",
+                        "text": "(quote of detached post)",
+                    },
+                )
     if "reply" in post:
         reply_segment = {"type": "reply", "subsegs": []}
         for position in ["root", "parent"]:
