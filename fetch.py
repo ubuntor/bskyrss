@@ -337,11 +337,19 @@ def post_to_html(post, author_did):
                 }
             )
         elif (
-            embed["$type"] == "app.bsky.embed.record#view"
-            or embed["$type"] == "app.bsky.embed.recordWithMedia#view"
+            embed["$type"]
+            in {
+                "app.bsky.embed.record#view",
+                "app.bsky.embed.record",
+                "app.bsky.embed.recordWithMedia#view",
+                "app.bsky.embed.recordWithMedia",
+            }
         ) and ("notFound" not in embed["record"] or not embed["record"]["notFound"]):
             # image or video quoted-posted
-            if embed["$type"] == "app.bsky.embed.recordWithMedia#view":
+            if embed["$type"] in {
+                "app.bsky.embed.recordWithMedia#view",
+                "app.bsky.embed.recordWithMedia",
+            }:
                 segments.extend(get_media_embeds(embed["media"], author_did))
                 embed["record"] = embed["record"]["record"]
             # some unhandled embeds, like starter packs, don't have authors
@@ -369,11 +377,14 @@ def post_to_html(post, author_did):
             match post["reply"][position]["$type"]:
                 case "app.bsky.feed.defs#notFoundPost":
                     reply_segment["subsegs"].append(
-                        {"type": "placeholder", "text": "(deleted post)"}
+                        {"type": "placeholder", "text": "(reply to deleted post)"}
                     )
                 case "app.bsky.feed.defs#blockedPost":
                     reply_segment["subsegs"].append(
-                        {"type": "placeholder", "text": "(post by blocked account)"}
+                        {
+                            "type": "placeholder",
+                            "text": "(reply to post by blocked account)",
+                        }
                     )
                 case "app.bsky.feed.defs#postView":
                     # TODO: add stubs for refs
