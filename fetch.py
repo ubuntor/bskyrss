@@ -108,6 +108,13 @@ class BskyXrpcClient:
         return r.json()
 
 
+def at_uri_to_url(uri):
+    author_did = uri[uri.index("did:") :].split("/")[0]
+    post_stub = uri.split("/")[-1]
+    # FIXME: improve this hardcoded link?
+    return f"{PROFILE_URL}/{author_did}/post/{post_stub}"
+
+
 def format_author(display_name, handle):
     if not display_name:
         return handle
@@ -162,7 +169,6 @@ def get_media_embeds(embed, author_did):
 
 
 def get_post_metadata(post, actor):
-    post_stub = post["uri"].split("/")[-1]
     original_date = iso(post["record"]["createdAt"])
     data = {
         "author": post["author"]["did"],
@@ -170,8 +176,7 @@ def get_post_metadata(post, actor):
         "authorName": post["author"]["displayName"],
         "original_date": original_date,
         "text": post["record"]["text"],
-        # FIXME: improve this hardcoded link?
-        "url": f"{PROFILE_URL}/{post['author']['did']}/post/{post_stub}",
+        "url": at_uri_to_url(post["uri"]),
         "categories": [],
     }
     if "reason" in post and "by" in post["reason"]:
@@ -342,7 +347,6 @@ def post_to_html(post, author_did):
             # some unhandled embeds, like starter packs, don't have authors
             if "author" in embed["record"]:
                 author = embed["record"]["author"]
-                post_stub = embed["record"]["uri"].split("/")[-1]
                 embed["record"]["record"] = embed["record"]["value"]
                 del embed["record"]["value"]
                 segments.insert(
@@ -351,28 +355,48 @@ def post_to_html(post, author_did):
                         "type": "quotepost",
                         "name": format_author(author["displayName"], author["handle"]),
                         "date": embed["record"]["record"]["createdAt"],
-                        # FIXME: improve this hardcoded link?
-                        "url": f"{PROFILE_URL}/{author['did']}/post/{post_stub}",
+                        "url": at_uri_to_url(embed["record"]["uri"]),
                         "html": post_to_html(embed["record"], author["did"]),
                     },
                 )
 
     if "reply" in post:
-        if "record" in post["reply"]["parent"]:
-            author = post["reply"]["parent"]["author"]
-            post_stub = post["reply"]["parent"]["uri"].split("/")[-1]
-            segments.insert(
-                0,
-                {
-                    "type": "reply",
-                    "name": format_author(author["displayName"], author["handle"]),
-                    "date": post["reply"]["parent"]["record"]["createdAt"],
-                    # FIXME: improve this hardcoded link?
-                    "url": f"{PROFILE_URL}/{author['did']}/post/{post_stub}",
-                    "html": post_to_html(post["reply"]["parent"], author["did"]),
-                },
-            )
+        reply_segment = {"type": "reply", "subsegs": []}
+        for position in ["root", "parent"]:
+            if position == "root":
+                if post["reply"]["root"]["uri"] == post["reply"]["parent"]["uri"]:
+                    continue
+            match post["reply"][position]["$type"]:
+                case "app.bsky.feed.defs#notFoundPost":
+                    reply_segment["subsegs"].append(
+                        {"type": "placeholder", "text": "(deleted post)"}
+                    )
+                case "app.bsky.feed.defs#blockedPost":
+                    reply_segment["subsegs"].append(
+                        {"type": "placeholder", "text": "(post by blocked account)"}
+                    )
+                case "app.bsky.feed.defs#postView":
+                    # TODO: add stubs for refs
+                    if "record" in post["reply"][position]:
+                        author = post["reply"][position]["author"]
+                        reply_segment["subsegs"].append(
+                            {
+                                "type": "post",
+                                "name": format_author(
+                                    author["displayName"], author["handle"]
+                                ),
+                                "date": post["reply"][position]["record"]["createdAt"],
+                                # FIXME: improve this hardcoded link?
+                                "url": at_uri_to_url(post["reply"][position]["uri"]),
+                                "html": post_to_html(
+                                    post["reply"][position], author["did"]
+                                ),
+                            }
+                        )
+            if position == "root":
+                reply_segment["subsegs"].append({"type": "reply_gap"})
 
+        segments.insert(0, reply_segment)
     return render_template("post.html", segments=segments)
 
 
