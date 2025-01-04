@@ -32,6 +32,8 @@ SKIP_AUTH_REQ_POSTS = False
 
 # constants
 PROFILE_URL = "https://bsky.app/profile"
+IMAGE_URL = "https://cdn.bsky.app/img/feed_fullsize/plain"
+VIDEO_URL = "https://video.bsky.app/watch"
 BSKY_PUBLIC_API = "https://public.api.bsky.app/xrpc"
 VALID_HANDLE_REGEX = re.compile(
     r"^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"
@@ -112,27 +114,50 @@ def format_author(display_name, handle):
     return f"{display_name} ({handle})"
 
 
-def get_media_embeds(embed):
+def get_media_embeds(embed, author_did):
     embeds = []
-    if embed["$type"] == "app.bsky.embed.images#view":
-        for image in embed["images"]:
-            alt = image["alt"]
-            src = image["fullsize"]
+    match embed["$type"]:
+        case "app.bsky.embed.images#view":
+            for image in embed["images"]:
+                alt = image["alt"]
+                src = image["fullsize"]
+                embeds.append(
+                    {
+                        "type": "image",
+                        "url": src,
+                        "alt": alt,
+                    }
+                )
+        case "app.bsky.embed.images":
+            for image in embed["images"]:
+                alt = image["alt"]
+                # FIXME: hardcoded...
+                src = f"{IMAGE_URL}/{author_did}/{image['image']['ref']['$link']}@jpeg"
+                embeds.append(
+                    {
+                        "type": "image",
+                        "url": src,
+                        "alt": alt,
+                    }
+                )
+        case "app.bsky.embed.video#view":
             embeds.append(
                 {
-                    "type": "image",
-                    "url": src,
-                    "alt": alt,
+                    "type": "video",
+                    "thumbnail": embed["thumbnail"],
+                    "playlist": embed["playlist"],
                 }
             )
-    elif embed["$type"] == "app.bsky.embed.video#view":
-        embeds.append(
-            {
-                "type": "video",
-                "thumbnail": embed["thumbnail"],
-                "playlist": embed["playlist"],
-            }
-        )
+        case "app.bsky.embed.video":
+            # FIXME: hardcoded...
+            video_link = embed["video"]["ref"]["$link"]
+            embeds.append(
+                {
+                    "type": "video",
+                    "thumbnail": f"{VIDEO_URL}/{author_did}/{video_link}/thumbnail.jpg",
+                    "playlist": f"{VIDEO_URL}/{author_did}/{video_link}/playlist.m3u8",
+                }
+            )
     return embeds
 
 
@@ -147,7 +172,7 @@ def get_post_metadata(post, actor):
         "text": post["record"]["text"],
         # FIXME: improve this hardcoded link?
         "url": f"{PROFILE_URL}/{post['author']['did']}/post/{post_stub}",
-        "categories": []
+        "categories": [],
     }
     if "reason" in post and "by" in post["reason"]:
         # FIXME: we don't have the repost date... https://github.com/bluesky-social/atproto/discussions/2702
@@ -198,17 +223,17 @@ def get_post_metadata(post, actor):
                         data["categories"].append("video")
                 record = post["embed"]["record"]["record"]
             match record["$type"]:
-                case "app.bsky.embed.record#viewNotFound" | "app.bsky.embed.record#viewDetached" | "app.bsky.embed.record#viewBlocked":
+                case (
+                    "app.bsky.embed.record#viewNotFound"
+                    | "app.bsky.embed.record#viewDetached"
+                    | "app.bsky.embed.record#viewBlocked"
+                ):
                     data["categories"].append("quote")
                 case _:
                     if "author" in record:
                         if record["author"]["did"] == actor:
                             data["categories"].append("self-quote")
                         else:
-                            author = format_author(
-                                record["author"]["displayName"],
-                                record["author"]["handle"],
-                            )
                             data["categories"].append("quote")
     if post_text == "":
         if "image" in data["categories"]:
@@ -219,7 +244,7 @@ def get_post_metadata(post, actor):
     return data
 
 
-def post_to_html(post, recurse=True):
+def post_to_html(post, author_did):
     segments = []
 
     if "record" in post and "text" in post["record"]:
@@ -288,9 +313,11 @@ def post_to_html(post, recurse=True):
         embeds = [post["embed"]]
     elif "embeds" in post:
         embeds = post["embeds"]
+    elif "record" in post and "embed" in post["record"]:
+        embeds = [post["record"]["embed"]]
 
     for embed in embeds:
-        media_embeds = get_media_embeds(embed)
+        media_embeds = get_media_embeds(embed, author_did)
         if media_embeds:
             segments.extend(media_embeds)
         elif embed["$type"] == "app.bsky.embed.external#view":
@@ -310,22 +337,23 @@ def post_to_html(post, recurse=True):
         ) and ("notFound" not in embed["record"] or not embed["record"]["notFound"]):
             # image or video quoted-posted
             if embed["$type"] == "app.bsky.embed.recordWithMedia#view":
-                segments.extend(get_media_embeds(embed["media"]))
+                segments.extend(get_media_embeds(embed["media"], author_did))
                 embed["record"] = embed["record"]["record"]
             # some unhandled embeds, like starter packs, don't have authors
-            if "author" in embed["record"] and recurse:
+            if "author" in embed["record"]:
                 author = embed["record"]["author"]
                 post_stub = embed["record"]["uri"].split("/")[-1]
                 embed["record"]["record"] = embed["record"]["value"]
+                del embed["record"]["value"]
                 segments.insert(
                     0,
                     {
                         "type": "quotepost",
                         "name": format_author(author["displayName"], author["handle"]),
-                        "date": embed["record"]["value"]["createdAt"],
+                        "date": embed["record"]["record"]["createdAt"],
                         # FIXME: improve this hardcoded link?
                         "url": f"{PROFILE_URL}/{author['did']}/post/{post_stub}",
-                        "html": post_to_html(embed["record"], False),
+                        "html": post_to_html(embed["record"], author["did"]),
                     },
                 )
 
@@ -341,7 +369,7 @@ def post_to_html(post, recurse=True):
                     "date": post["reply"]["parent"]["record"]["createdAt"],
                     # FIXME: improve this hardcoded link?
                     "url": f"{PROFILE_URL}/{author['did']}/post/{post_stub}",
-                    "html": post_to_html(post["reply"]["parent"], False),
+                    "html": post_to_html(post["reply"]["parent"], author["did"]),
                 },
             )
 
@@ -455,7 +483,7 @@ def actorfeed(actor: str) -> Response:
         )
         postdata = postdata.fetchone()
         if not postdata[0]:
-            html = post_to_html(post)
+            html = post_to_html(post, post_metadata["author"])
             data = {
                 "cid": post["cid"],
                 "did": post_metadata["author"],
@@ -517,7 +545,7 @@ def actorfeed(actor: str) -> Response:
                 "updated": post[8],
                 "author": author,
                 "title": title,
-                "categories": categories
+                "categories": categories,
             }
         )
 
