@@ -115,10 +115,10 @@ def at_uri_to_url(uri):
     return f"{PROFILE_URL}/{author_did}/post/{post_stub}"
 
 
-def format_author(display_name, handle):
-    if not display_name:
-        return handle
-    return f"{display_name} ({handle})"
+def format_author(author):
+    if "displayName" not in author or not author["displayName"]:
+        return author["handle"]
+    return f"{author['displayName']} ({author['handle']})"
 
 
 def get_media_embeds(embed, author_did):
@@ -204,10 +204,7 @@ def get_post_metadata(post, actor):
             data["title"] = f"Self-replied: "
             data["categories"].append("self-reply")
         else:
-            author = format_author(
-                post["reply"]["parent"]["author"]["displayName"],
-                post["reply"]["parent"]["author"]["handle"],
-            )
+            author = format_author(post["reply"]["parent"]["author"])
             data["title"] = f"Replied to {author}: "
             data["categories"].append("reply")
 
@@ -359,7 +356,7 @@ def post_to_html(post, author_did):
                     0,
                     {
                         "type": "quotepost",
-                        "name": format_author(author["displayName"], author["handle"]),
+                        "name": format_author(author),
                         "date": embed["record"]["record"]["createdAt"],
                         "url": at_uri_to_url(embed["record"]["uri"]),
                         "html": post_to_html(embed["record"], author["did"]),
@@ -406,9 +403,7 @@ def post_to_html(post, author_did):
                         reply_segment["subsegs"].append(
                             {
                                 "type": "post",
-                                "name": format_author(
-                                    author["displayName"], author["handle"]
-                                ),
+                                "name": format_author(author),
                                 "date": post["reply"][position]["record"]["createdAt"],
                                 # FIXME: improve this hardcoded link?
                                 "url": at_uri_to_url(post["reply"][position]["uri"]),
@@ -489,14 +484,13 @@ def actorfeed(actor: str) -> Response:
                 ):
                     abort(404)
 
-        author = profile["displayName"]
         avatar = profile["avatar"]
         # descriptions can be missing
         description = profile.get("description", "")
         profile = {
             "did": actor,
             "handle": profile["handle"],
-            "name": format_author(author, profile["handle"]),
+            "name": format_author(profile),
             "avatar": avatar,
             "description": description,
             "updated": now.isoformat(),
@@ -577,7 +571,7 @@ def actorfeed(actor: str) -> Response:
     posts_data = []
 
     for post in posts:
-        author = format_author(post[6], post[5])
+        author = format_author({"displayName": post[6], "handle": post[5]})
         title = post[7]
         categories = [] if post[9] == "" else post[9].split(",")
         if "self-repost" in categories:
