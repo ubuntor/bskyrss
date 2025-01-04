@@ -405,7 +405,6 @@ def post_to_html(post, author_did):
                                 "type": "post",
                                 "name": format_author(author),
                                 "date": post["reply"][position]["record"]["createdAt"],
-                                # FIXME: improve this hardcoded link?
                                 "url": at_uri_to_url(post["reply"][position]["uri"]),
                                 "html": post_to_html(
                                     post["reply"][position], author["did"]
@@ -413,7 +412,20 @@ def post_to_html(post, author_did):
                             }
                         )
             if position == "root":
-                reply_segment["subsegs"].append({"type": "reply_gap"})
+                if (
+                    "record" in post["reply"]["parent"]
+                    and "reply" in post["reply"]["parent"]["record"]
+                    and post["reply"]["parent"]["record"]["reply"]["root"]["uri"]
+                    == post["reply"]["parent"]["record"]["reply"]["parent"]["uri"]
+                ):
+                    # grandparent and root are the same
+                    reply_segment["subsegs"].append(
+                        {"type": "reply_gap", "html": "<br>"}
+                    )
+                else:
+                    reply_segment["subsegs"].append(
+                        {"type": "reply_gap", "html": "&vellip;"}
+                    )
 
         segments.insert(0, reply_segment)
     return render_template("post.html", segments=segments)
