@@ -262,67 +262,6 @@ def get_post_metadata(post, actor):
 def post_to_html(post, author_did):
     segments = []
 
-    if "record" in post and "text" in post["record"]:
-        text = post["record"]["text"]
-        cursor = 0
-        if "facets" in post["record"]:
-            # FIXME: round-trip encoding sucks a lot, but is hard to avoid...
-            btext = text.encode("utf-8")
-            for facet in sorted(
-                post["record"]["facets"], key=lambda x: x["index"]["byteStart"]
-            ):
-                if facet["features"][0]["$type"] == "app.bsky.richtext.facet#link":
-                    segments.append(
-                        {
-                            "type": "text",
-                            "value": btext[cursor : facet["index"]["byteStart"]].decode(
-                                "utf-8", "surrogateescape"
-                            ),
-                        }
-                    )
-                    url = facet["features"][0]["uri"]
-                    link_text = btext[
-                        facet["index"]["byteStart"] : facet["index"]["byteEnd"]
-                    ].decode("utf-8", "surrogateescape")
-                    segments.append(
-                        {
-                            "type": "link",
-                            "text": link_text,
-                            "url": url,
-                        }
-                    )
-                    cursor = facet["index"]["byteEnd"]
-                elif facet["features"][0]["$type"] == "app.bsky.richtext.facet#mention":
-                    segments.append(
-                        {
-                            "type": "text",
-                            "value": btext[cursor : facet["index"]["byteStart"]].decode(
-                                "utf-8", "surrogateescape"
-                            ),
-                        }
-                    )
-                    did = facet["features"][0]["did"]
-                    url = f"{PROFILE_URL}/{did}"
-                    link_text = btext[
-                        facet["index"]["byteStart"] : facet["index"]["byteEnd"]
-                    ].decode("utf-8", "surrogateescape")
-                    segments.append(
-                        {
-                            "type": "link",
-                            "text": link_text,
-                            "url": url,
-                        }
-                    )
-                    cursor = facet["index"]["byteEnd"]
-            segments.append(
-                {
-                    "type": "text",
-                    "value": btext[cursor:].decode("utf-8", "surrogateescape"),
-                }
-            )
-        else:
-            segments.append({"type": "text", "value": text})
-
     embeds = []
     if "embed" in post:
         embeds = [post["embed"]]
@@ -441,6 +380,68 @@ def post_to_html(post, author_did):
                     )
 
         segments.insert(0, reply_segment)
+
+    if "record" in post and "text" in post["record"]:
+        text = post["record"]["text"]
+        cursor = 0
+        if "facets" in post["record"]:
+            # FIXME: round-trip encoding sucks a lot, but is hard to avoid...
+            btext = text.encode("utf-8")
+            for facet in sorted(
+                post["record"]["facets"], key=lambda x: x["index"]["byteStart"]
+            ):
+                if facet["features"][0]["$type"] == "app.bsky.richtext.facet#link":
+                    segments.append(
+                        {
+                            "type": "text",
+                            "value": btext[cursor : facet["index"]["byteStart"]].decode(
+                                "utf-8", "surrogateescape"
+                            ),
+                        }
+                    )
+                    url = facet["features"][0]["uri"]
+                    link_text = btext[
+                        facet["index"]["byteStart"] : facet["index"]["byteEnd"]
+                    ].decode("utf-8", "surrogateescape")
+                    segments.append(
+                        {
+                            "type": "link",
+                            "text": link_text,
+                            "url": url,
+                        }
+                    )
+                    cursor = facet["index"]["byteEnd"]
+                elif facet["features"][0]["$type"] == "app.bsky.richtext.facet#mention":
+                    segments.append(
+                        {
+                            "type": "text",
+                            "value": btext[cursor : facet["index"]["byteStart"]].decode(
+                                "utf-8", "surrogateescape"
+                            ),
+                        }
+                    )
+                    did = facet["features"][0]["did"]
+                    url = f"{PROFILE_URL}/{did}"
+                    link_text = btext[
+                        facet["index"]["byteStart"] : facet["index"]["byteEnd"]
+                    ].decode("utf-8", "surrogateescape")
+                    segments.append(
+                        {
+                            "type": "link",
+                            "text": link_text,
+                            "url": url,
+                        }
+                    )
+                    cursor = facet["index"]["byteEnd"]
+            segments.append(
+                {
+                    "type": "text",
+                    "value": btext[cursor:].decode("utf-8", "surrogateescape"),
+                }
+            )
+        else:
+            segments.append({"type": "text", "value": text})
+
     return render_template("post.html", segments=segments)
 
 
