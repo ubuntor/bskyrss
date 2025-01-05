@@ -325,7 +325,13 @@ def post_to_html(post, author_did):
                 if "$type" not in embed["record"]:
                     embed["record"] = embed["record"]["record"]
             if embed["$type"] == "app.bsky.embed.record":
-                pass
+                segments.insert(
+                    0,
+                    {
+                        "type": "quotepost",
+                        "url": at_uri_to_url(embed["record"]["uri"]),
+                    },
+                )
             elif embed["record"]["$type"] == "app.bsky.embed.record#viewNotFound":
                 segments.insert(
                     0,
