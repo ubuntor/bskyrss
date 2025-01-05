@@ -16,6 +16,8 @@ from flask import (
     request,
     send_from_directory,
 )
+from jinja2 import pass_eval_context
+from markupsafe import Markup, escape
 from werkzeug.exceptions import NotFound
 
 REFETCH_HANDLES_SECS = 86400 * 7
@@ -49,6 +51,19 @@ DEFAULT_FILTER = "posts_and_author_threads"
 app = Flask(__name__)
 iso = datetime.fromisoformat
 Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
+
+
+@app.template_filter()
+@pass_eval_context
+def nl2br(eval_ctx, value):
+    br = "<br>\n"
+    if eval_ctx.autoescape:
+        br = Markup(br)
+    result = "\n\n".join(
+        f"<p>{br.join(p.splitlines())}</p>"
+        for p in re.split(r"(?:\r\n|\r(?!\n)|\n){2,}", value)
+    )
+    return Markup(result) if eval_ctx.autoescape else result
 
 
 class BskyXrpcClient:
@@ -206,20 +221,6 @@ def get_post_metadata(post, actor):
     post_text = ""
     if "text" in post["record"] and post["record"]["text"] != "":
         post_text = post["record"]["text"]
-    if "reply" in post:
-        if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
-            data["title"] = "Replied to deleted post: "
-            data["categories"].append("reply")
-        elif post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#blockedPost":
-            data["title"] = "Replied to blocked post: "
-            data["categories"].append("reply")
-        elif post["reply"]["parent"]["author"]["did"] == actor:
-            data["title"] = f"Self-replied: "
-            data["categories"].append("self-reply")
-        else:
-            author = format_author(post["reply"]["parent"]["author"])
-            data["title"] = f"Replied to {author}: "
-            data["categories"].append("reply")
 
     if "embed" in post:
         match post["embed"]["$type"]:
@@ -238,18 +239,41 @@ def get_post_metadata(post, actor):
                         data["categories"].append("video")
                 record = post["embed"]["record"]["record"]
             match record["$type"]:
-                case (
-                    "app.bsky.embed.record#viewNotFound"
-                    | "app.bsky.embed.record#viewDetached"
-                    | "app.bsky.embed.record#viewBlocked"
-                ):
+                case "app.bsky.embed.record#viewNotFound":
                     data["categories"].append("quote")
+                    data["title"] = "Quoted deleted post: "
+                case "app.bsky.embed.record#viewDetached":
+                    data["categories"].append("quote")
+                    data["title"] = "Quoted detached post: "
+                case "app.bsky.embed.record#viewBlocked":
+                    data["categories"].append("quote")
+                    data["title"] = "Quoted blocked post: "
                 case _:
                     if "author" in record:
                         if record["author"]["did"] == actor:
                             data["categories"].append("self-quote")
+                            data["title"] = "Self-quoted: "
                         else:
                             data["categories"].append("quote")
+                            author = format_author(record["author"])
+                            data["title"] = f"Quoted {author}: "
+
+    # reply takes precedence over quotes in the title
+    if "reply" in post:
+        if post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#notFoundPost":
+            data["title"] = "Replied to deleted post: "
+            data["categories"].append("reply")
+        elif post["reply"]["parent"]["$type"] == "app.bsky.feed.defs#blockedPost":
+            data["title"] = "Replied to blocked post: "
+            data["categories"].append("reply")
+        elif post["reply"]["parent"]["author"]["did"] == actor:
+            data["title"] = f"Self-replied: "
+            data["categories"].append("self-reply")
+        else:
+            author = format_author(post["reply"]["parent"]["author"])
+            data["title"] = f"Replied to {author}: "
+            data["categories"].append("reply")
+
     if post_text == "":
         if "image" in data["categories"]:
             post_text = "(image)"
@@ -261,7 +285,6 @@ def get_post_metadata(post, actor):
 
 def post_to_html(post, author_did):
     segments = []
-
     embeds = []
     if "embed" in post:
         embeds = [post["embed"]]
@@ -299,21 +322,8 @@ def post_to_html(post, author_did):
                 segments.extend(get_media_embeds(embed["media"], author_did))
                 if "$type" not in embed["record"]:
                     embed["record"] = embed["record"]["record"]
-            # some unhandled embeds, like starter packs, don't have authors
-            if "author" in embed["record"]:
-                author = embed["record"]["author"]
-                embed["record"]["record"] = embed["record"]["value"]
-                del embed["record"]["value"]
-                segments.insert(
-                    0,
-                    {
-                        "type": "quotepost",
-                        "name": format_author(author),
-                        "date": embed["record"]["record"]["createdAt"],
-                        "url": at_uri_to_url(embed["record"]["uri"]),
-                        "html": post_to_html(embed["record"], author["did"]),
-                    },
-                )
+            if embed["$type"] == "app.bsky.embed.record":
+                pass
             elif embed["record"]["$type"] == "app.bsky.embed.record#viewNotFound":
                 segments.insert(
                     0,
@@ -328,6 +338,29 @@ def post_to_html(post, author_did):
                     {
                         "type": "placeholder",
                         "text": "(quote of detached post)",
+                    },
+                )
+            elif embed["record"]["$type"] == "app.bsky.embed.record#viewBlocked":
+                segments.insert(
+                    0,
+                    {
+                        "type": "placeholder",
+                        "text": "(quote of blocked post)",
+                    },
+                )
+            elif "author" in embed["record"]:
+                # some unhandled embeds, like starter packs, don't have authors
+                author = embed["record"]["author"]
+                embed["record"]["record"] = embed["record"]["value"]
+                del embed["record"]["value"]
+                segments.insert(
+                    0,
+                    {
+                        "type": "quotepost",
+                        "name": format_author(author),
+                        "date": embed["record"]["record"]["createdAt"],
+                        "url": at_uri_to_url(embed["record"]["uri"]),
+                        "html": post_to_html(embed["record"], author["did"]),
                     },
                 )
     if "reply" in post:
@@ -349,7 +382,6 @@ def post_to_html(post, author_did):
                         }
                     )
                 case "app.bsky.feed.defs#postView":
-                    # TODO: add stubs for refs
                     if "record" in post["reply"][position]:
                         author = post["reply"][position]["author"]
                         reply_segment["subsegs"].append(
@@ -539,15 +571,6 @@ def actorfeed(actor: str) -> Response:
     if not posts:
         abort(404)
 
-    data = {"did": actor, "filter": post_filter}
-    if posts != []:
-        # just in case that the latest post has a spoofed post date in the far future, clamp to now
-        data["fetched"] = min(
-            max(map(get_post_date, posts)), datetime.now(timezone.utc)
-        )
-    curs.execute("INSERT OR REPLACE INTO fetches VALUES(:did, :filter, :fetched)", data)
-    conn.commit()
-
     for post in posts:
         post_metadata = get_post_metadata(post, actor)
         # FIXME: look into updating edited posts
@@ -588,6 +611,15 @@ def actorfeed(actor: str) -> Response:
             f" UPDATE SET filter_{post_filter} = 1, updated = max(updated, :updated)",
             data,
         )
+    conn.commit()
+
+    data = {"did": actor, "filter": post_filter}
+    if posts != []:
+        # just in case that the latest post has a spoofed post date in the far future, clamp to now
+        data["fetched"] = min(
+            max(map(get_post_date, posts)), datetime.now(timezone.utc)
+        )
+    curs.execute("INSERT OR REPLACE INTO fetches VALUES(:did, :filter, :fetched)", data)
     conn.commit()
 
     posts = curs.execute(
