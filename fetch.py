@@ -18,7 +18,6 @@ from flask import (
 )
 from werkzeug.exceptions import NotFound
 
-MAX_POST_FETCH_SECS = 86400
 REFETCH_HANDLES_SECS = 86400 * 7
 REFETCH_PROFILES_SECS = 86400 * 7
 CACHE_NONEXISTENT_HANDLES_SECS = 86400
@@ -26,6 +25,7 @@ CACHE_POSTS_SECS = 3600
 CACHE_DIR = "cache"
 DATABASE = "bsky.db"
 MAX_POSTS_IN_FEED = 100
+MIN_POSTS_IN_FEED = 30  # >=1, <=100
 
 # anti-feature?
 SKIP_AUTH_REQ_POSTS = False
@@ -64,27 +64,37 @@ class BskyXrpcClient:
         }
 
         now = datetime.now(timezone.utc)
+        earliest_post_date = now
         posts = []
         while True:
             r = self.s.get(url, params=params)
             r.raise_for_status()
-            earliest_post_date = now
-            for item in r.json()["feed"]:
+            feed = r.json()["feed"]
+            if not feed:
+                return posts
+
+            for item in feed:
                 post = item["post"]
-                post_date = iso(post["record"]["createdAt"])
+                # reposts make the post date not monotonic...
+                if "reason" in post and "by" in post["reason"]:
+                    post_date = iso(post["reason"]["indexedAt"])
+                else:
+                    post_date = iso(post["record"]["createdAt"])
                 if post_date < now:
                     earliest_post_date = post_date
+                if len(posts) > MIN_POSTS_IN_FEED and (
+                    (last and earliest_post_date < last)
+                    or len(posts) >= MAX_POSTS_IN_FEED
+                ):
+                    return posts
                 if "reply" in item:
                     post["reply"] = item["reply"]
                 if "reason" in item:
                     post["reason"] = item["reason"]
                 posts.append(post)
 
-            # FIXME: implement last
+            # on first fetch, only return up to 30 posts
             if not last:
-                return posts
-
-            if (now - earliest_post_date).total_seconds() >= MAX_POST_FETCH_SECS:
                 return posts
 
             params.update(
@@ -441,6 +451,7 @@ def actorfeed(actor: str) -> Response:
     conn = get_db()
     curs = conn.cursor()
     now = datetime.now(timezone.utc)
+    fetched = None
 
     res = curs.execute(
         "SELECT fetched FROM fetches WHERE did = ? AND filter = ?", (actor, post_filter)
@@ -463,7 +474,6 @@ def actorfeed(actor: str) -> Response:
     # check last time actor feed was updated
     res = curs.execute("SELECT * FROM profiles WHERE did = ?", (actor,))
     res = res.fetchone()
-    fetched = None
 
     # we know about this actor already
     if res:
