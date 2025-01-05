@@ -55,7 +55,9 @@ class BskyXrpcClient:
     def __init__(self):
         self.s = requests.Session()
 
-    def get_posts(self, actor, post_filter, server_url=BSKY_PUBLIC_API, last=None):
+    def get_posts(
+        self, actor, post_filter, server_url=BSKY_PUBLIC_API, last_fetched=None
+    ):
         url = f"{server_url}/app.bsky.feed.getAuthorFeed"
         params = {
             "actor": actor,
@@ -76,14 +78,11 @@ class BskyXrpcClient:
             for item in feed:
                 post = item["post"]
                 # reposts make the post date not monotonic...
-                if "reason" in post and "by" in post["reason"]:
-                    post_date = iso(post["reason"]["indexedAt"])
-                else:
-                    post_date = iso(post["record"]["createdAt"])
+                post_date = get_post_date(post)
                 if post_date < now:
                     earliest_post_date = post_date
                 if len(posts) > MIN_POSTS_IN_FEED and (
-                    (last and earliest_post_date < last)
+                    (last_fetched and earliest_post_date < last_fetched)
                     or len(posts) >= MAX_POSTS_IN_FEED
                 ):
                     return posts
@@ -94,7 +93,7 @@ class BskyXrpcClient:
                 posts.append(post)
 
             # on first fetch, only return up to 30 posts
-            if not last:
+            if not last_fetched:
                 return posts
 
             params.update(
@@ -178,27 +177,31 @@ def get_media_embeds(embed, author_did):
     return embeds
 
 
+def get_post_date(post):
+    if "reason" in post and "by" in post["reason"]:
+        # FIXME: we don't have the repost date... https://github.com/bluesky-social/atproto/discussions/2702
+        # using indexedAt as the next best thing
+        return iso(post["reason"]["indexedAt"])
+    else:
+        return iso(post["record"]["createdAt"])
+
+
 def get_post_metadata(post, actor):
-    original_date = iso(post["record"]["createdAt"])
     data = {
         "author": post["author"]["did"],
         "authorHandle": post["author"]["handle"],
         "authorName": post["author"]["displayName"],
-        "original_date": original_date,
+        "original_date": iso(post["record"]["createdAt"]),
+        "date": get_post_date(post),
         "text": post["record"]["text"],
         "url": at_uri_to_url(post["uri"]),
         "categories": [],
     }
     if "reason" in post and "by" in post["reason"]:
-        # FIXME: we don't have the repost date... https://github.com/bluesky-social/atproto/discussions/2702
-        # using indexedAt as the next best thing
-        data["date"] = iso(post["reason"]["indexedAt"])
         if post["author"]["did"] == actor:
             data["categories"].append("self-repost")
         else:
             data["categories"].append("repost")
-    else:
-        data["date"] = original_date
     data["title"] = ""
     post_text = ""
     if "text" in post["record"] and post["record"]["text"] != "":
@@ -528,14 +531,19 @@ def actorfeed(actor: str) -> Response:
     profile["url"] = f"{PROFILE_URL}/{profile['did']}"
 
     try:
-        posts = client.get_posts(actor, post_filter, last=fetched)
+        posts = client.get_posts(actor, post_filter, last_fetched=fetched)
     except requests.HTTPError:
         abort(404)
 
     if not posts:
         abort(404)
 
-    data = {"did": actor, "filter": post_filter, "fetched": now}
+    data = {"did": actor, "filter": post_filter}
+    if posts != []:
+        # just in case that the latest post has a spoofed post date in the far future, clamp to now
+        data["fetched"] = min(
+            max(map(get_post_date, posts)), datetime.now(timezone.utc)
+        )
     curs.execute("INSERT OR REPLACE INTO fetches VALUES(:did, :filter, :fetched)", data)
     conn.commit()
 
