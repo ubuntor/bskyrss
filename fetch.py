@@ -27,7 +27,8 @@ CACHE_POSTS_SECS = 3600
 CACHE_DIR = "cache"
 DATABASE = "bsky.db"
 MAX_POSTS_IN_FEED = 100
-MIN_POSTS_IN_FEED = 30  # >=1, <=100
+MIN_POSTS_IN_FEED = 30
+FEED_FETCH_SIZE = 30  # >=1, <=100
 
 # anti-feature?
 SKIP_AUTH_REQ_POSTS = False
@@ -77,7 +78,7 @@ class BskyXrpcClient:
         params = {
             "actor": actor,
             "filter": post_filter,
-            "limit": 30,
+            "limit": FEED_FETCH_SIZE,
         }
 
         now = datetime.now(timezone.utc)
@@ -87,8 +88,6 @@ class BskyXrpcClient:
             r = self.s.get(url, params=params)
             r.raise_for_status()
             feed = r.json()["feed"]
-            if not feed:
-                return posts
 
             for item in feed:
                 post = item["post"]
@@ -96,19 +95,23 @@ class BskyXrpcClient:
                 post_date = get_post_date(post)
                 if post_date < now:
                     earliest_post_date = post_date
-                if len(posts) > MIN_POSTS_IN_FEED and (
-                    (last_fetched and earliest_post_date < last_fetched)
-                    or len(posts) >= MAX_POSTS_IN_FEED
-                ):
-                    return posts
                 if "reply" in item:
                     post["reply"] = item["reply"]
                 if "reason" in item:
                     post["reason"] = item["reason"]
                 posts.append(post)
+                if len(posts) >= MIN_POSTS_IN_FEED and (
+                    (last_fetched and earliest_post_date <= last_fetched)
+                    or len(posts) >= MAX_POSTS_IN_FEED
+                ):
+                    return posts
 
-            # on first fetch, only return up to 30 posts
+            # on first fetch, only return up to 1 batch of posts
             if not last_fetched:
+                return posts
+
+            # end of posts
+            if len(feed) < FEED_FETCH_SIZE:
                 return posts
 
             params.update(
