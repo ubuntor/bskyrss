@@ -15,6 +15,7 @@ from flask import (
     render_template,
     request,
     send_from_directory,
+    url_for,
 )
 from jinja2 import pass_eval_context
 from markupsafe import Markup, escape
@@ -714,7 +715,9 @@ def handlefeed(handle) -> Response:
             conn.commit()
 
     if actor:
-        return actorfeed(actor)
+        return redirect(
+            url_for("actor", actor=actor, filter=request.args.get("filter"))
+        )
     abort(404)
 
 
@@ -756,7 +759,7 @@ def bare_handle():
         abort(404)
     if len(handle) > 253 or not VALID_HANDLE_REGEX.match(handle):
         abort(404)
-    return redirect(f"/handle/{handle}")
+    return redirect(url_for("handle", handle=handle, filter=request.args.get("filter")))
 
 
 @app.route("/actor/<actor>")
