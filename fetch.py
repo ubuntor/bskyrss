@@ -71,9 +71,7 @@ class BskyXrpcClient:
     def __init__(self):
         self.s = requests.Session()
 
-    def get_posts(
-        self, actor, post_filter, server_url=BSKY_PUBLIC_API, last_fetched=None
-    ):
+    def get_posts(self, actor, post_filter, server_url=BSKY_PUBLIC_API, last=None):
         url = f"{server_url}/app.bsky.feed.getAuthorFeed"
         params = {
             "actor": actor,
@@ -101,13 +99,13 @@ class BskyXrpcClient:
                     post["reason"] = item["reason"]
                 posts.append(post)
                 if len(posts) >= MIN_POSTS_IN_FEED and (
-                    (last_fetched and earliest_post_date <= last_fetched)
+                    (last and earliest_post_date <= last)
                     or len(posts) >= MAX_POSTS_IN_FEED
                 ):
                     return posts
 
             # on first fetch, only return up to 1 batch of posts
-            if not last_fetched:
+            if not last:
                 return posts
 
             # end of posts
@@ -490,13 +488,16 @@ def actorfeed(actor: str) -> Response:
     conn = get_db()
     curs = conn.cursor()
     now = datetime.now(timezone.utc)
-    fetched = None
+    latest_date = None
 
     res = curs.execute(
-        "SELECT fetched FROM fetches WHERE did = ? AND filter = ?", (actor, post_filter)
+        "SELECT fetched, latest_date FROM fetches WHERE did = ? AND filter = ?",
+        (actor, post_filter),
     ).fetchone()
     if res:
         fetched = iso(res[0])
+        if res[1]:
+            latest_date = iso(res[1])
         # if fetched less than an hour ago, return cached file
         post_age = (now - fetched).total_seconds()
         if post_age < CACHE_POSTS_SECS:
@@ -567,7 +568,7 @@ def actorfeed(actor: str) -> Response:
     profile["url"] = f"{PROFILE_URL}/{profile['did']}"
 
     try:
-        posts = client.get_posts(actor, post_filter, last_fetched=fetched)
+        posts = client.get_posts(actor, post_filter, last=latest_date)
     except requests.HTTPError:
         abort(404)
 
@@ -616,13 +617,16 @@ def actorfeed(actor: str) -> Response:
         )
     conn.commit()
 
-    data = {"did": actor, "filter": post_filter}
+    data = {"did": actor, "filter": post_filter, "fetched": now.isoformat()}
     if posts != []:
-        # just in case that the latest post has a spoofed post date in the far future, clamp to now
-        data["fetched"] = min(
+        # just in case that the latest post has a spoofed post date in the far future, clamp to right now
+        data["latest_date"] = min(
             max(map(get_post_date, posts)), datetime.now(timezone.utc)
-        )
-    curs.execute("INSERT OR REPLACE INTO fetches VALUES(:did, :filter, :fetched)", data)
+        ).isoformat()
+    curs.execute(
+        "INSERT OR REPLACE INTO fetches VALUES(:did, :filter, :fetched, :latest_date)",
+        data,
+    )
     conn.commit()
 
     posts = curs.execute(
@@ -699,13 +703,13 @@ def handlefeed(handle) -> Response:
             abort(404)
 
         if actor:
-            data = {"actor": actor, "handle": handle, "now": now}
+            data = {"actor": actor, "handle": handle, "now": now.isoformat()}
             curs.execute(
                 "INSERT OR REPLACE INTO handles VALUES(:handle, :actor, :now)", data
             )
             conn.commit()
         else:
-            data = {"handle": handle, "now": now}
+            data = {"handle": handle, "now": now.isoformat()}
             curs.execute("INSERT OR REPLACE INTO handles VALUES(:handle, :now)", data)
             conn.commit()
 

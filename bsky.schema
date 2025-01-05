@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS "profiles" (
 CREATE TABLE IF NOT EXISTS "fetches" (
     "did" TEXT NOT NULL,
     "filter" TEXT NOT NULL,
-    "fetched" TEXT,
+    "fetched" TEXT NOT NULL,
+    "latest_date" TEXT,
     PRIMARY KEY ("did", "filter"),
     UNIQUE ("did", "filter") ON CONFLICT REPLACE
 );

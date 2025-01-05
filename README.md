@@ -1,3 +1,31 @@
+## fork tweaks/notes:
+
+usage: `/actor/<did>` (preferred) or `/handle/<handle>`
+
+both of these can also take a `?filter=<filter>` param, where `<filter>` can be:
+ * `posts_and_author_threads`: posts and threads consisting of only the author (default: this is what you see when viewing someone's profile)
+ * `posts_with_replies`: all posts
+ * `posts_no_replies`: no replies
+ * `posts_with_media`: all posts by the author with media (i.e. the media tab)
+
+misc tidbits:
+- post titles are of the form:
+  - regular post: `<text>`
+  - reply: `Replied to <account>: <text>`, `Self-replied: <text>`, or `Replied to deleted/blocked post: ...`
+  - quote: `Quoted <account>: <text>`, `Self-quoted: <text>`, or `Quoted detached/deleted/blocked post: ...` (if not a reply)
+  - if a post is a repost, then the title gets prepended with `Reposted <account>: ` or `Self-reposted: `
+- posts can have the following categories for ease of filtering: `reply`, `self-reply`, `quote`, `self-quote`, `repost`, `self-repost`, `image`, `video`
+  - `reply` means non-self reply, etc.
+- videos turn into images using the thumbnail (if your feed reader is hackable or you can have userscripts, you can turn those back into videos with hls.js)
+- all embeds (quotes/images/videos/etc.) are above the post since that makes more sense from a reading-order perspective (and i'm cohost-brained)
+- this will probably break in exciting ways if post dates are spoofed
+
+deployment notes:
+- if needed, use `ProxyFix`: https://flask.palletsprojects.com/en/stable/deploying/proxy_fix/
+- run [`trim_db.py`](trim_db.py) regularly
+
+original readme follows below:
+
 # Bluesky to RSS bridge
 
 Bluesky has built in support for RSS feeds on profiles, but these are
