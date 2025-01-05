@@ -10,15 +10,22 @@
     <div>Subscribe to Bluesky users via RSS!</div>
     <div>
       <form action="/handle">
-        <label for="handle">Enter the handle of a Bluesky user you want to follow:</label>
-        <input type="text" name="handle" id="handle" required /><br>
+        <div>
+          <label for="handle">Enter the handle of a Bluesky user you want to follow:</label>
+          <input type="text" name="handle" id="handle" required />
+        </div>
+        <div>
         <label for="filter">Filter:</label>
-        <select name="filter" id="filter" required>
-          <option value="posts_and_author_threads">posts_and_author_threads</option>
-          <option value="posts_with_replies">posts_with_replies</option>
-          <option value="posts_no_replies">posts_no_replies</option>
-          <option value="posts_with_media">posts_with_media</option>
-        </select>
+          <select name="filter" id="filter" required>
+            <option value="posts_and_author_threads">posts_and_author_threads</option>
+            <option value="posts_with_replies">posts_with_replies</option>
+            <option value="posts_no_replies">posts_no_replies</option>
+            <option value="posts_with_media">posts_with_media</option>
+          </select>
+        </div>
+        <div>
+          <input type="submit" value="Get feed" />
+        </div>
       </form>
     </div>
   </body>
