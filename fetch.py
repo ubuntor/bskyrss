@@ -62,7 +62,7 @@ def nl2br(eval_ctx, value):
     if eval_ctx.autoescape:
         br = Markup(br)
     result = "\n\n".join(
-        f"<p>{br.join(p.splitlines())}</p>"
+        f"{br.join(p.splitlines())}"
         for p in re.split(r"(?:\r\n|\r(?!\n)|\n){2,}", value)
     )
     return Markup(result) if eval_ctx.autoescape else result
