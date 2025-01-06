@@ -1,8 +1,8 @@
 ## fork tweaks/notes:
 
-usage: `/actor/<did>` (preferred) or `/handle/<handle>`
+usage: `/feed/<did_or_handle>` (did preferred)
 
-both of these can also take a `?filter=<filter>` param, where `<filter>` can be:
+this can also take a `?filter=<filter>` param, where `<filter>` can be:
  * `posts_and_author_threads`: posts and threads consisting of only the author (default: this is what you see when viewing someone's profile)
  * `posts_with_replies`: all posts
  * `posts_no_replies`: no replies

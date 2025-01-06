@@ -676,7 +676,7 @@ def actorfeed(actor: str) -> Response:
 
     feed_data = {
         "post_filter": post_filter,
-        "url": request.url_root + f"actor/{actor}?filter={post_filter}",
+        "url": request.url_root + f"feed/{actor}?filter={post_filter}",
     }
 
     ofs = render_template(
@@ -727,9 +727,7 @@ def handlefeed(handle) -> Response:
             conn.commit()
 
     if actor:
-        return redirect(
-            url_for("actor", actor=actor, filter=request.args.get("filter"))
-        )
+        return redirect(url_for("feed", user=actor, filter=request.args.get("filter")))
     abort(404)
 
 
@@ -757,28 +755,27 @@ def close_connection(exception):
         db.close()
 
 
-@app.route("/handle/<handle>")
-def handle(handle):
-    if len(handle) > 253 or not VALID_HANDLE_REGEX.match(handle):
-        abort(404)
-    return handlefeed(handle)
+def is_valid_handle(handle):
+    return len(handle) <= 253 and VALID_HANDLE_REGEX.match(handle)
 
 
-@app.route("/handle")
-def bare_handle():
-    handle = request.args.get("handle")
-    if not handle:
-        abort(404)
-    if len(handle) > 253 or not VALID_HANDLE_REGEX.match(handle):
-        abort(404)
-    return redirect(url_for("handle", handle=handle, filter=request.args.get("filter")))
+def is_valid_did(actor):
+    return len(actor) == 32 and actor.startswith("did:plc:") and actor[8:].isalnum()
 
 
-@app.route("/actor/<actor>")
-def actor(actor):
-    if len(actor) != 32 or not actor.startswith("did:plc:") or not actor[8:].isalnum():
-        abort(404)
-    return actorfeed(actor)
+@app.route("/feed/<user>")
+def feed(user):
+    if is_valid_handle(user):
+        return handlefeed(user)
+    if is_valid_did(user):
+        return actorfeed(user)
+    abort(404)
+
+
+@app.route("/feed")
+def bare_feed():
+    user = request.args.get("user")
+    return redirect(url_for("feed", user=user, filter=request.args.get("filter")))
 
 
 @app.route("/")
