@@ -58,14 +58,10 @@ Path(CACHE_DIR).mkdir(parents=True, exist_ok=True)
 @app.template_filter()
 @pass_eval_context
 def nl2br(eval_ctx, value):
-    br = "<br>\n"
-    if eval_ctx.autoescape:
-        br = Markup(br)
-    result = "\n\n".join(
-        f"{br.join(p.splitlines())}"
-        for p in re.split(r"(?:\r\n|\r(?!\n)|\n){2,}", value)
-    )
-    return Markup(result) if eval_ctx.autoescape else result
+    assert eval_ctx.autoescape
+    br = Markup("<br>")
+    result = br.join(value.split("\n"))
+    return Markup(result)
 
 
 class BskyXrpcClient:
@@ -388,13 +384,13 @@ def post_to_html(post, author_did):
             match post["reply"][position]["$type"]:
                 case "app.bsky.feed.defs#notFoundPost":
                     reply_segment["subsegs"].append(
-                        {"type": "placeholder", "text": "(reply to deleted post)"}
+                        {"type": "placeholder", "text": "(deleted post)"}
                     )
                 case "app.bsky.feed.defs#blockedPost":
                     reply_segment["subsegs"].append(
                         {
                             "type": "placeholder",
-                            "text": "(reply to post by blocked account)",
+                            "text": "(post by blocked account)",
                         }
                     )
                 case "app.bsky.feed.defs#postView":
@@ -432,6 +428,7 @@ def post_to_html(post, author_did):
     if "record" in post and "text" in post["record"]:
         text = post["record"]["text"]
         cursor = 0
+        text_seg = {"type": "text", "subsegs": []}
         if "facets" in post["record"]:
             # FIXME: round-trip encoding sucks a lot, but is hard to avoid...
             btext = text.encode("utf-8")
@@ -439,7 +436,7 @@ def post_to_html(post, author_did):
                 post["record"]["facets"], key=lambda x: x["index"]["byteStart"]
             ):
                 if facet["features"][0]["$type"] == "app.bsky.richtext.facet#link":
-                    segments.append(
+                    text_seg["subsegs"].append(
                         {
                             "type": "text",
                             "value": btext[cursor : facet["index"]["byteStart"]].decode(
@@ -451,7 +448,7 @@ def post_to_html(post, author_did):
                     link_text = btext[
                         facet["index"]["byteStart"] : facet["index"]["byteEnd"]
                     ].decode("utf-8", "surrogateescape")
-                    segments.append(
+                    text_seg["subsegs"].append(
                         {
                             "type": "link",
                             "text": link_text,
@@ -460,7 +457,7 @@ def post_to_html(post, author_did):
                     )
                     cursor = facet["index"]["byteEnd"]
                 elif facet["features"][0]["$type"] == "app.bsky.richtext.facet#mention":
-                    segments.append(
+                    text_seg["subsegs"].append(
                         {
                             "type": "text",
                             "value": btext[cursor : facet["index"]["byteStart"]].decode(
@@ -473,7 +470,7 @@ def post_to_html(post, author_did):
                     link_text = btext[
                         facet["index"]["byteStart"] : facet["index"]["byteEnd"]
                     ].decode("utf-8", "surrogateescape")
-                    segments.append(
+                    text_seg["subsegs"].append(
                         {
                             "type": "link",
                             "text": link_text,
@@ -481,14 +478,15 @@ def post_to_html(post, author_did):
                         }
                     )
                     cursor = facet["index"]["byteEnd"]
-            segments.append(
+            text_seg["subsegs"].append(
                 {
                     "type": "text",
                     "value": btext[cursor:].decode("utf-8", "surrogateescape"),
                 }
             )
         else:
-            segments.append({"type": "text", "value": text})
+            text_seg["subsegs"].append({"type": "text", "value": text})
+        segments.append(text_seg)
 
     return render_template("post.html", segments=segments)
 
