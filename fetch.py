@@ -415,9 +415,7 @@ def post_to_html(post, author_did):
                     == post["reply"]["parent"]["record"]["reply"]["parent"]["uri"]
                 ):
                     # grandparent and root are the same
-                    reply_segment["subsegs"].append(
-                        {"type": "reply_gap", "html": "<br>"}
-                    )
+                    reply_segment["subsegs"].append({"type": "reply_gap", "html": ""})
                 else:
                     reply_segment["subsegs"].append(
                         {"type": "reply_gap", "html": "&vellip;"}
