@@ -557,8 +557,9 @@ def actorfeed(actor: str) -> Response:
                 ):
                     abort(404)
 
-        avatar = profile["avatar"]
-        # descriptions can be missing
+        # avatars can be missing...
+        avatar = profile.get("avatar", "")
+        # descriptions can be missing...
         description = profile.get("description", "")
         profile = {
             "did": actor,

@@ -6,8 +6,8 @@
   <updated>{{ profile["updated"] }}</updated>
   <author>
     <name>{{ profile["name"] }}</name>
-  </author>
-  <logo>{{ profile["avatar"] }}</logo>
+  </author>{% if profile["avatar"] %}
+  <logo>{{ profile["avatar"] }}</logo>{% endif %}
   <subtitle>{{ profile["description"] }}</subtitle>{% for post in posts %}
   <entry>
     <id>cid:{{ post["cid"] }}</id>
