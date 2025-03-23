@@ -547,7 +547,6 @@ def actorfeed(actor: str) -> Response:
             profile = client.get_profile(actor)
         except requests.HTTPError:
             abort(404)
-
         # option: don't allow fetching "login-required" profiles
         if SKIP_AUTH_REQ_POSTS and "labels" in profile:
             for label in profile["labels"]:
@@ -606,6 +605,9 @@ def actorfeed(actor: str) -> Response:
                 "name": post_metadata["authorName"],
                 "title": post_metadata["title"],
             }
+            # posts can contain surrogates??? what on earth
+            data = {k: re.sub("[\ud800-\udfff]", "\ufffd", v) for k, v in data.items()}
+            print(data)
             curs.execute(
                 "INSERT INTO posts VALUES(:cid, :did, :url, :html, :date, :handle,"
                 " :name, :title)",
