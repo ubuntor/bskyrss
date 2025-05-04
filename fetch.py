@@ -203,7 +203,7 @@ def get_post_metadata(post, actor):
     data = {
         "author": post["author"]["did"],
         "authorHandle": post["author"]["handle"],
-        "authorName": post["author"]["displayName"],
+        "authorName": post["author"].get("displayName", ""),
         "original_date": iso(post["record"]["createdAt"]),
         "date": get_post_date(post),
         "text": post["record"]["text"],
